@@ -1,0 +1,16 @@
+[
+  {
+    "modid": "${modid}",
+    "name": "Kestrel",
+    "description": "Kestrel PvP client: HUD, cosmetics, skies, kill effects and performance presets.",
+    "version": "${version}",
+    "mcversion": "${mcversion}",
+    "url": "",
+    "updateUrl": "",
+    "authorList": ["Kellen"],
+    "credits": "Build setup based on the public-domain Forge1.8.9Template by nea89o.",
+    "logoFile": "",
+    "screenshots": [],
+    "dependencies": []
+  }
+]

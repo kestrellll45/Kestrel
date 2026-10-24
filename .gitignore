@@ -1,0 +1,26 @@
+# Build output
+/dist/
+/launcher/target/
+/client/build/
+/client/.gradle/
+/client/run/
+/client/out/
+/client/.idea/
+*.iml
+# Never commit game files, credentials or local data
+*.log
+accounts.dat
+launcher.json
+install-state.json
+/release/
+# Release signing keys must never be committed (the public key file is fine).
+*signing-key*
+*.private
+
+# Python caches (tools/)
+__pycache__/
+*.pyc
+
+# Generated per machine by Gradle/loom (logs can contain player names and paths)
+/client/logs/
+/client/.vscode/

@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/kestrel-core", "crates/kestrel-launcher", "crates/kestrel-release"]
+
+[workspace.package]
+edition = "2024"
+version = "0.2.0"
+license = "MIT"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
