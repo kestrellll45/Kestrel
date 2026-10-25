@@ -4,7 +4,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use kestrel_core::cosmetics::{BUILTIN_CAPES, BUILTIN_SKIES, Kind};
+use kestrel_core::cosmetics::{BUILTIN_SKIES, Kind, cape_catalog};
 use kestrel_core::install;
 use kestrel_core::paths::Layout;
 
@@ -93,8 +93,18 @@ pub fn run(layout: &Layout, report_path: Option<&Path>) -> i32 {
             .map(|i| format!("{}x{}", i.width, i.height))
             .map_err(|e| e.to_string()),
     );
-    for (kind, ids) in [(Kind::Cape, BUILTIN_CAPES), (Kind::Sky, BUILTIN_SKIES)] {
-        for (id, _) in ids {
+    let capes: Vec<&str> = cape_catalog().iter().map(|c| c.id.as_str()).collect();
+    check(
+        "cape catalog",
+        if capes.is_empty() {
+            Err("capes.json is empty or invalid".to_string())
+        } else {
+            Ok(format!("{} capes", capes.len()))
+        },
+    );
+    let skies: Vec<&str> = BUILTIN_SKIES.iter().map(|(id, _)| *id).collect();
+    for (kind, ids) in [(Kind::Cape, capes), (Kind::Sky, skies)] {
+        for id in ids {
             check(
                 &format!("bundled {kind:?} preview '{id}'"),
                 crate::cosmetics_page::load_preview(layout, kind, id)

@@ -220,10 +220,15 @@ public final class ClientSettingsScreen extends GuiScreen {
                     co.animatedCapes = v;
                     changed();
                 }));
-                content.add(intSlider("Animation FPS", 1, 30, () -> co.animationFps, v -> co.animationFps = v));
+                content.add(intSlider("Animation FPS (PNG strips)", 1, 30, () -> co.animationFps, v -> co.animationFps = v));
+                content.add(new Toggle("Show players' assigned capes", () -> co.showAssignedCapes, v -> {
+                    co.showAssignedCapes = v;
+                    changed();
+                }));
                 content.add(new ActionButton("Open custom capes folder", false, () -> openFolder(client.capes().customDir())));
-                text("Custom capes: PNG, 64x32 (or HD multiples like 128x64), max 2 MB. Animated: stack frames vertically. "
-                        + "Capes are visible to you only - other players do not see them. Not shown if you own an official cape.");
+                text("Custom capes: PNG, 64x32 (or HD multiples like 128x64), max 2 MB; animated PNGs stack frames vertically. "
+                        + "GIFs (max 4 MB) play with their own timing: a 2:1 GIF is used as a cape sheet, any other GIF is fitted onto both sides. "
+                        + "Your cape is drawn by your client only. Not shown if you own an official cape.");
                 if (client.capes().lastError() != null) {
                     content.add(new Header("Last error: " + client.capes().lastError(), false, Theme.ERR));
                 }

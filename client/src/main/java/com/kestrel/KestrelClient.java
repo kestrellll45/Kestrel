@@ -93,7 +93,8 @@ public final class KestrelClient {
         applyQol(cfg);
 
         input.registerKeybinds();
-        Object[] listeners = {this, performance, input, toggleSprint, hud, crosshair, capes, sky, killEffects, killDetector, launcherSync};
+        ActivityReporter activity = new ActivityReporter(System.getProperty("kestrel.activityToken"));
+        Object[] listeners = {this, performance, input, toggleSprint, hud, crosshair, capes, sky, killEffects, killDetector, launcherSync, activity};
         for (Object l : listeners) {
             MinecraftForge.EVENT_BUS.register(l);
         }

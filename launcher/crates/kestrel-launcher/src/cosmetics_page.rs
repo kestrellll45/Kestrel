@@ -13,15 +13,16 @@ use std::time::Duration;
 
 use egui::{Color32, CornerRadius, Pos2, RichText, Sense, Stroke, Vec2};
 use kestrel_core::cosmetics::{
-    self, BUILTIN_CAPES, BUILTIN_SKIES, CAPE_NONE, CUSTOM_PREFIX, CosmeticSettings, KILL_EFFECTS,
-    Kind, Rgba,
+    self, BUILTIN_SKIES, CAPE_NONE, CUSTOM_PREFIX, CosmeticSettings, KILL_EFFECTS, Kind, Rgba,
 };
 use kestrel_core::paths::Layout;
 
 use crate::app::{ACCENT, CARD, ERR, MUTED, OK, WARN, card, heading};
 
 // Bundled textures, shared with the client mod's resources, for previews.
-const BUNDLED_CAPES: &[(&str, &[u8])] = &[
+// One entry per catalog cape (capes.json); animated GIF capes use their
+// static fallback PNG here.
+pub(crate) const BUNDLED_CAPES: &[(&str, &[u8])] = &[
     (
         "ember",
         include_bytes!(
@@ -50,6 +51,12 @@ const BUNDLED_CAPES: &[(&str, &[u8])] = &[
         "aurora",
         include_bytes!(
             "../../../../client/src/main/resources/assets/kestrel/textures/capes/aurora.png"
+        ),
+    ),
+    (
+        "teto",
+        include_bytes!(
+            "../../../../client/src/main/resources/assets/kestrel/textures/capes/teto.png"
         ),
     ),
 ];
@@ -102,6 +109,9 @@ pub struct CosmeticsPage {
     pending: bool,
     custom_capes: Vec<String>,
     custom_skies: Vec<String>,
+    /// UUID of the signed-in Microsoft account (None offline / signed out),
+    /// used only to decide which restricted catalog capes to offer.
+    account_uuid: Option<String>,
     textures: HashMap<String, egui::TextureHandle>,
     preview_errors: HashMap<String, String>,
     requested: std::collections::HashSet<String>,
@@ -124,6 +134,7 @@ impl CosmeticsPage {
             pending: false,
             custom_capes: Vec::new(),
             custom_skies: Vec::new(),
+            account_uuid: None,
             textures: HashMap::new(),
             preview_errors: HashMap::new(),
             requested: Default::default(),
@@ -135,6 +146,12 @@ impl CosmeticsPage {
             preview_started: 0.0,
             loaded: false,
         }
+    }
+
+    /// Set the account whose restricted capes may be offered. The mod checks
+    /// ownership again in game; this only keeps the list honest.
+    pub fn set_account(&mut self, uuid: Option<&str>) {
+        self.account_uuid = uuid.map(str::to_string);
     }
 
     /// Re-read state from disk (called whenever the page is opened).
@@ -244,12 +261,19 @@ impl CosmeticsPage {
 
     fn upload(&mut self, kind: Kind) {
         let (title, label) = match kind {
-            Kind::Cape => ("Choose a cape texture", "PNG cape (64x32, HD or animated)"),
+            Kind::Cape => (
+                "Choose a cape texture",
+                "PNG or GIF cape (64x32, HD, animated)",
+            ),
             Kind::Sky => ("Choose a sky texture", "PNG sky (3x2 grid, 3:2)"),
+        };
+        let exts: &[&str] = match kind {
+            Kind::Cape => &["png", "PNG", "gif", "GIF"],
+            Kind::Sky => &["png", "PNG"],
         };
         let Some(path) = rfd::FileDialog::new()
             .set_title(title)
-            .add_filter(label, &["png", "PNG"])
+            .add_filter(label, exts)
             .pick_file()
         else {
             return;
@@ -591,9 +615,14 @@ impl CosmeticsPage {
                 ui.add_space(12.0);
                 ui.checkbox(&mut self.settings.cosmetics.capes_enabled, "Show cape");
                 ui.checkbox(&mut self.settings.cosmetics.animated_capes, "Animate");
+                ui.checkbox(
+                    &mut self.settings.cosmetics.show_assigned_capes,
+                    "Show players' assigned capes",
+                );
             });
             ui.label(
-                RichText::new("PNG, Minecraft cape layout: 64x32, HD multiples (128x64 …), or animated (frames stacked vertically). Max 2 MB. \
+                RichText::new("PNG (max 2 MB): Minecraft cape layout, 64x32 or HD multiples (128x64 …); animated PNGs stack frames vertically. \
+                               GIF (max 4 MB): plays with its own timing; a 2:1 GIF is used as a cape sheet, any other GIF is fitted onto both sides of the cape. \
                                If you own an official Minecraft cape, the game shows that one instead.")
                     .small()
                     .color(MUTED),
@@ -603,17 +632,31 @@ impl CosmeticsPage {
 
         let mut items: Vec<(String, String, bool)> =
             vec![(CAPE_NONE.into(), "No cape".into(), false)];
+        let me = self.account_uuid.as_deref();
         items.extend(
-            BUILTIN_CAPES
+            cosmetics::cape_catalog()
                 .iter()
-                .map(|(id, n)| (id.to_string(), n.to_string(), false)),
+                .filter(|c| c.allows(me))
+                .map(|c| (c.id.clone(), c.name.clone(), false)),
         );
         items.extend(
             self.custom_capes
                 .iter()
                 .map(|f| (format!("{CUSTOM_PREFIX}{f}"), f.clone(), true)),
         );
-        if !items.iter().any(|i| i.0 == self.settings.cosmetics.cape) {
+        let reserved = cosmetics::cape_catalog()
+            .iter()
+            .find(|c| c.id == self.settings.cosmetics.cape && !c.allows(me));
+        if let Some(c) = reserved {
+            ui.label(
+                RichText::new(format!(
+                    "The equipped cape ({}) is reserved for another account and will not render. \
+                     Sign in with the account it belongs to, or choose another.",
+                    c.name
+                ))
+                .color(WARN),
+            );
+        } else if !items.iter().any(|i| i.0 == self.settings.cosmetics.cape) {
             ui.label(RichText::new(format!(
                 "The equipped cape ({}) is missing from the capes folder and will not render. Choose another.",
                 self.settings.cosmetics.cape.trim_start_matches(CUSTOM_PREFIX)
@@ -742,10 +785,9 @@ pub(crate) fn load_preview(layout: &Layout, kind: Kind, id: &str) -> Result<Rgba
             .map(|(_, b)| b.to_vec())
             .ok_or("unknown cosmetic")?
     };
-    let img = cosmetics::validate_image(kind, &bytes)?;
     Ok(match kind {
-        Kind::Cape => cosmetics::cape_preview(&img),
-        Kind::Sky => cosmetics::sky_preview(&img, 384),
+        Kind::Cape => cosmetics::cape_preview_bytes(&bytes)?,
+        Kind::Sky => cosmetics::sky_preview(&cosmetics::validate_image(kind, &bytes)?, 384),
     })
 }
 
@@ -1101,4 +1143,30 @@ fn heart(p: &egui::Painter, c: Pos2, r: f32, col: Color32) {
         col,
         Stroke::NONE,
     ));
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+
+    /// Every catalog cape needs an embedded preview (and nothing stale is embedded).
+    #[test]
+    fn every_catalog_cape_has_a_preview() {
+        let ids: Vec<&str> = cosmetics::cape_catalog()
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        let embedded: Vec<&str> = BUNDLED_CAPES.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, embedded);
+        // Bundled previews never touch the data folder.
+        let layout = Layout::new(PathBuf::from("unused-root"));
+        for id in ids {
+            let p = load_preview(&layout, Kind::Cape, id).unwrap();
+            assert_eq!(
+                p.width * 16,
+                p.height * 10,
+                "{id}: preview is one 10:16 face"
+            );
+        }
+    }
 }

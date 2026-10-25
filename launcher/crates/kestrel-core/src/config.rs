@@ -91,6 +91,11 @@ pub struct LauncherConfig {
     /// from this launcher. Play stays blocked while the running version is
     /// older, even offline; cleared once a check shows nothing is required.
     pub update_required_minimum: String,
+    /// Show Kestrel/Minecraft activity in Discord (needs `discord_client_id`).
+    pub discord_rpc_enabled: bool,
+    /// Discord application ID of the "Kestrel" app (Developer Portal). Empty
+    /// = Rich Presence not configured.
+    pub discord_client_id: String,
 }
 
 impl Default for LauncherConfig {
@@ -113,6 +118,8 @@ impl Default for LauncherConfig {
             update_auto_check: true,
             update_dismissed_version: String::new(),
             update_required_minimum: String::new(),
+            discord_rpc_enabled: true,
+            discord_client_id: String::new(),
         }
     }
 }

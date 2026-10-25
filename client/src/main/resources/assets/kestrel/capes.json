@@ -1,0 +1,22 @@
+{
+  "_comment": "Bundled capes. See documentation/CAPES.md. Texture paths are relative to assets/kestrel/textures/. 'owners' restricts a cape to exact player UUIDs (usernames are never used).",
+  "capes": [
+    {"id": "ember", "name": "Ember", "texture": "capes/ember.png"},
+    {"id": "glacier", "name": "Glacier", "texture": "capes/glacier.png"},
+    {"id": "midnight", "name": "Midnight", "texture": "capes/midnight.png"},
+    {"id": "verdant", "name": "Verdant", "texture": "capes/verdant.png"},
+    {"id": "aurora", "name": "Aurora (animated)", "texture": "capes/aurora.png"},
+    {
+      "id": "teto",
+      "name": "Kasane Teto (animated)",
+      "texture": "capes/teto.gif",
+      "fallback": "capes/teto.png",
+      "layout": "faces",
+      "scale": 8,
+      "crop": [0, 46, 231, 406],
+      "fill": "#FF8298",
+      "edge": "#C9576D",
+      "owners": ["ba14933e-a7ad-4816-8696-a788cc1b3c1f"]
+    }
+  ]
+}

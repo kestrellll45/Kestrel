@@ -18,10 +18,20 @@
 //! Uploaded images are fully decoded and validated with the same rules the
 //! mod enforces, then copied (never referenced in place) into
 //! `instance/kestrel/capes` or `instance/kestrel/skies` under a sanitised
-//! file name.
+//! file name. Capes may be PNG or GIF; skies are PNG.
 //!
-//! Everything here is local: capes, skies and effects are rendered by your
-//! own client only. Other players do not see them.
+//! # Cape catalog
+//!
+//! Bundled capes are listed in the mod's `assets/kestrel/capes.json`, which
+//! is compiled into both the mod jar and this crate, so the two can never
+//! disagree. A catalog cape with `owners` is restricted to those exact
+//! Minecraft UUIDs (usernames are never used); the launcher only offers it
+//! to a matching signed-in account, and the mod independently refuses to
+//! render it for anyone else.
+//!
+//! Everything here is local: your capes, skies and effects are rendered by
+//! your own client. The only exception is that Kestrel clients draw a
+//! restricted catalog cape on the player who owns it.
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -35,17 +45,118 @@ use crate::paths::{Layout, atomic_write};
 
 pub const CUSTOM_PREFIX: &str = "custom:";
 pub const CAPE_NONE: &str = "none";
+/// PNG capes (mod: `CapeManager.MAX_FILE_BYTES`).
 pub const MAX_CAPE_BYTES: u64 = 2 * 1024 * 1024;
+/// GIF capes (mod: `GifDecoder.CAPE_LIMITS`).
+pub const MAX_CAPE_GIF_BYTES: u64 = 4 * 1024 * 1024;
 pub const MAX_SKY_BYTES: u64 = 16 * 1024 * 1024;
+/// GIF limits, identical to the mod's `GifDecoder.CAPE_LIMITS`.
+const GIF_MAX_SIDE: u32 = 1024;
+const GIF_MAX_FRAMES: u32 = 128;
+/// Decoded texels kept per cape (mod: `CapeManager.MAX_TEXELS_PER_CAPE`).
+const MAX_TEXELS_PER_CAPE: u64 = 12 * 1024 * 1024;
+/// A GIF that is not a cape sheet is fitted onto a 512x256 texture
+/// (mod: `CapeManager.CUSTOM_GIF_SCALE` = 8).
+const FACES_TEXELS: u64 = 512 * 256;
 
-/// Bundled capes (id, display name). Must match `CapeManager.BUILTIN`.
-pub const BUILTIN_CAPES: &[(&str, &str)] = &[
-    ("ember", "Ember"),
-    ("glacier", "Glacier"),
-    ("midnight", "Midnight"),
-    ("verdant", "Verdant"),
-    ("aurora", "Aurora (animated)"),
-];
+/// The mod's cape catalog, compiled in so the launcher and mod agree.
+const CAPE_CATALOG_JSON: &str =
+    include_str!("../../../../client/src/main/resources/assets/kestrel/capes.json");
+
+/// A bundled cape from `capes.json`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CapeEntry {
+    pub id: String,
+    pub name: String,
+    /// Path under `assets/kestrel/textures/`.
+    pub texture: String,
+    /// Static PNG used where the animation cannot be (e.g. previews).
+    #[serde(default)]
+    pub fallback: Option<String>,
+    /// Owner UUIDs; `None` = available to everyone. Kept private so callers
+    /// go through [`CapeEntry::allows`].
+    #[serde(default)]
+    owners: Option<Vec<String>>,
+}
+
+impl CapeEntry {
+    pub fn restricted(&self) -> bool {
+        self.owners.is_some()
+    }
+
+    /// Whether the account with this UUID may wear the cape. Only the UUID is
+    /// compared (normalised: case- and dash-insensitive); `None` (offline or
+    /// signed out) gets unrestricted capes only. An empty owner list allows
+    /// nobody.
+    pub fn allows(&self, uuid: Option<&str>) -> bool {
+        let Some(owners) = &self.owners else {
+            return true;
+        };
+        let Some(me) = uuid.and_then(normalize_uuid) else {
+            return false;
+        };
+        owners
+            .iter()
+            .filter_map(|o| normalize_uuid(o))
+            .any(|o| o == me)
+    }
+}
+
+#[derive(Deserialize)]
+struct CatalogFile {
+    capes: Vec<CapeEntry>,
+}
+
+/// Parse and check a cape catalog (unique ids, valid owner UUIDs).
+pub fn parse_catalog(json: &str) -> std::result::Result<Vec<CapeEntry>, String> {
+    let file: CatalogFile = serde_json::from_str(json).map_err(|e| format!("capes.json: {e}"))?;
+    let mut seen = std::collections::HashSet::new();
+    for c in &file.capes {
+        if c.id.is_empty() || c.id == CAPE_NONE || c.id.starts_with(CUSTOM_PREFIX) {
+            return Err(format!("capes.json: invalid id '{}'", c.id));
+        }
+        if !seen.insert(c.id.as_str()) {
+            return Err(format!("capes.json: duplicate id '{}'", c.id));
+        }
+        if let Some(owners) = &c.owners
+            && let Some(bad) = owners.iter().find(|o| normalize_uuid(o).is_none())
+        {
+            return Err(format!("capes.json: {}: invalid owner UUID '{bad}'", c.id));
+        }
+    }
+    Ok(file.capes)
+}
+
+/// The bundled cape catalog. A broken catalog (caught by tests) yields an
+/// empty list rather than a crash.
+pub fn cape_catalog() -> &'static [CapeEntry] {
+    static CATALOG: std::sync::OnceLock<Vec<CapeEntry>> = std::sync::OnceLock::new();
+    CATALOG.get_or_init(|| {
+        parse_catalog(CAPE_CATALOG_JSON).unwrap_or_else(|e| {
+            log::error!("{e}");
+            Vec::new()
+        })
+    })
+}
+
+/// Canonical Minecraft UUID: 32 lower-case hex digits without dashes.
+/// Accepts the dashed 8-4-4-4-12 form or 32 hex digits, any case.
+pub fn normalize_uuid(s: &str) -> Option<String> {
+    let t = s.trim();
+    let hex: String = if t.len() == 36 {
+        let b = t.as_bytes();
+        if b[8] != b'-' || b[13] != b'-' || b[18] != b'-' || b[23] != b'-' {
+            return None;
+        }
+        t.chars().filter(|&c| c != '-').collect()
+    } else {
+        t.to_string()
+    };
+    if hex.len() != 32 || !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(hex.to_ascii_lowercase())
+}
 
 /// Bundled skies (id, display name). Must match `SkyManager.BUILTIN`.
 pub const BUILTIN_SKIES: &[(&str, &str)] = &[
@@ -103,6 +214,13 @@ pub struct CapeSettings {
     pub capes_enabled: bool,
     pub cape: String,
     pub animated_capes: bool,
+    /// Draw catalog capes on the players they are assigned to (by UUID).
+    #[serde(default = "default_true")]
+    pub show_assigned_capes: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -152,6 +270,7 @@ impl Default for CosmeticSettings {
                 capes_enabled: true,
                 cape: CAPE_NONE.into(),
                 animated_capes: true,
+                show_assigned_capes: true,
             },
             sky: SkySettings {
                 enabled: false,
@@ -295,6 +414,7 @@ fn settings_from_config(c: &Value) -> CosmeticSettings {
             capes_enabled: b(cos, "capesEnabled", d.cosmetics.capes_enabled),
             cape: s(cos, "cape", &d.cosmetics.cape),
             animated_capes: b(cos, "animatedCapes", d.cosmetics.animated_capes),
+            show_assigned_capes: b(cos, "showAssignedCapes", d.cosmetics.show_assigned_capes),
         },
         sky: SkySettings {
             enabled: b(sky, "enabled", d.sky.enabled),
@@ -358,7 +478,15 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Largest file of any accepted format (GIF capes may be larger than PNGs).
     fn max_bytes(self) -> u64 {
+        match self {
+            Kind::Cape => MAX_CAPE_GIF_BYTES,
+            Kind::Sky => MAX_SKY_BYTES,
+        }
+    }
+
+    fn max_png_bytes(self) -> u64 {
         match self {
             Kind::Cape => MAX_CAPE_BYTES,
             Kind::Sky => MAX_SKY_BYTES,
@@ -467,13 +595,120 @@ pub fn decode_png(bytes: &[u8]) -> std::result::Result<Rgba, String> {
     })
 }
 
-/// Fully validate image bytes for a cosmetic kind.
+pub fn is_gif(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")
+}
+
+/// A GIF in the cape sheet layout (2:1, width a multiple of 64, <= 1024);
+/// the mod fits any other GIF onto both faces of the cape.
+pub fn is_cape_sheet(w: u32, h: u32) -> bool {
+    w >= 64 && w.is_multiple_of(64) && w == h * 2 && w <= 1024
+}
+
+/// Validate a cape GIF with the mod's rules (`GifDecoder` + `CapeManager`):
+/// size, logical screen, every frame's rectangle, frame count, decoded
+/// texture budget, and a full decode of every frame. Returns frame 0 on a
+/// transparent canvas of the logical screen size.
+pub fn validate_cape_gif(bytes: &[u8]) -> std::result::Result<Rgba, String> {
+    if bytes.len() as u64 > MAX_CAPE_GIF_BYTES {
+        return Err(format!(
+            "GIF is too large ({} KB, max {} KB)",
+            bytes.len() / 1024,
+            MAX_CAPE_GIF_BYTES / 1024
+        ));
+    }
+    if !is_gif(bytes) {
+        return Err("not a GIF image".into());
+    }
+    let mut opts = gif::DecodeOptions::new();
+    opts.set_color_output(gif::ColorOutput::RGBA);
+    let frame_limit = u64::from(GIF_MAX_SIDE) * u64::from(GIF_MAX_SIDE) * 4;
+    if let Some(n) = std::num::NonZeroU64::new(frame_limit) {
+        opts.set_memory_limit(gif::MemoryLimit::Bytes(n));
+    }
+    let mut dec = opts
+        .read_info(Cursor::new(bytes))
+        .map_err(|e| format!("corrupt GIF: {e}"))?;
+    let (w, h) = (u32::from(dec.width()), u32::from(dec.height()));
+    if w == 0 || h == 0 {
+        return Err("GIF has invalid dimensions".into());
+    }
+    if w > GIF_MAX_SIDE || h > GIF_MAX_SIDE {
+        return Err(format!(
+            "GIF is too large ({w}x{h}, max {GIF_MAX_SIDE} px per side)"
+        ));
+    }
+    let texels_per_frame = if is_cape_sheet(w, h) {
+        u64::from(w) * u64::from(h)
+    } else {
+        FACES_TEXELS
+    };
+    let mut first: Option<Rgba> = None;
+    let mut frames = 0u32;
+    let mut buf = Vec::new();
+    loop {
+        let (fx, fy, fw, fh) = match dec
+            .next_frame_info()
+            .map_err(|e| format!("corrupt GIF: {e}"))?
+        {
+            None => break,
+            Some(f) => (
+                u32::from(f.left),
+                u32::from(f.top),
+                u32::from(f.width),
+                u32::from(f.height),
+            ),
+        };
+        frames += 1;
+        if frames > GIF_MAX_FRAMES {
+            return Err(format!("GIF has too many frames (max {GIF_MAX_FRAMES})"));
+        }
+        if fw == 0 || fh == 0 || fw > GIF_MAX_SIDE || fh > GIF_MAX_SIDE {
+            return Err(format!("corrupt GIF: frame {} is {fw}x{fh}", frames - 1));
+        }
+        if u64::from(frames) * texels_per_frame > MAX_TEXELS_PER_CAPE {
+            return Err("animated cape is too large (too many frames for its size)".into());
+        }
+        buf.resize(dec.buffer_size(), 0);
+        dec.read_into_buffer(&mut buf)
+            .map_err(|e| format!("corrupt GIF: {e}"))?;
+        if first.is_none() {
+            first = Some(place_frame(w, h, fx, fy, fw, fh, &buf));
+        }
+    }
+    first.ok_or_else(|| "GIF has no frames".to_string())
+}
+
+/// Draw an RGBA frame rectangle onto a transparent w x h canvas (clipped).
+fn place_frame(w: u32, h: u32, fx: u32, fy: u32, fw: u32, fh: u32, rgba: &[u8]) -> Rgba {
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    for y in 0..fh.min(h.saturating_sub(fy)) {
+        for x in 0..fw.min(w.saturating_sub(fx)) {
+            let src = ((y * fw + x) * 4) as usize;
+            let dst = (((fy + y) * w + (fx + x)) * 4) as usize;
+            if rgba.len() >= src + 4 && rgba[src + 3] != 0 {
+                pixels[dst..dst + 4].copy_from_slice(&rgba[src..src + 4]);
+            }
+        }
+    }
+    Rgba {
+        width: w,
+        height: h,
+        pixels,
+    }
+}
+
+/// Fully validate image bytes for a cosmetic kind. For GIF capes this
+/// returns the first frame.
 pub fn validate_image(kind: Kind, bytes: &[u8]) -> std::result::Result<Rgba, String> {
-    if bytes.len() as u64 > kind.max_bytes() {
+    if kind == Kind::Cape && is_gif(bytes) {
+        return validate_cape_gif(bytes);
+    }
+    if bytes.len() as u64 > kind.max_png_bytes() {
         return Err(format!(
             "file is too large ({} KB, max {} KB)",
             bytes.len() / 1024,
-            kind.max_bytes() / 1024
+            kind.max_png_bytes() / 1024
         ));
     }
     // Check dimensions from the header before allocating for pixels.
@@ -487,7 +722,8 @@ pub fn validate_image(kind: Kind, bytes: &[u8]) -> std::result::Result<Rgba, Str
     Ok(img)
 }
 
-/// Turn a user file name into a safe one: `[A-Za-z0-9_-]`, max 40 chars, `.png`.
+/// Turn a user file name into a safe stem: `[A-Za-z0-9_-]`, max 40 chars
+/// (the extension is chosen from the validated content).
 pub fn sanitize_file_stem(name: &str) -> String {
     let stem = Path::new(name)
         .file_stem()
@@ -524,6 +760,11 @@ pub fn import(layout: &Layout, kind: Kind, src: &Path) -> Result<String> {
     }
     let bytes = std::fs::read(src).at(src)?;
     validate_image(kind, &bytes).map_err(Error::Other)?;
+    let ext = if kind == Kind::Cape && is_gif(&bytes) {
+        "gif"
+    } else {
+        "png"
+    };
 
     let dir = match kind {
         Kind::Cape => capes_dir(layout),
@@ -538,9 +779,9 @@ pub fn import(layout: &Layout, kind: Kind, src: &Path) -> Result<String> {
     let new_hash = hash::sha1_bytes(&bytes);
     for n in 1..1000 {
         let name = if n == 1 {
-            format!("{stem}.png")
+            format!("{stem}.{ext}")
         } else {
-            format!("{stem}-{n}.png")
+            format!("{stem}-{n}.{ext}")
         };
         let dest = dir.join(&name);
         if dest.exists() {
@@ -567,7 +808,10 @@ pub fn list_custom(layout: &Layout, kind: Kind) -> Vec<String> {
             rd.flatten()
                 .filter(|e| e.path().is_file())
                 .filter_map(|e| e.file_name().to_str().map(str::to_string))
-                .filter(|n| n.to_ascii_lowercase().ends_with(".png"))
+                .filter(|n| {
+                    let n = n.to_ascii_lowercase();
+                    n.ends_with(".png") || (kind == Kind::Cape && n.ends_with(".gif"))
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -602,6 +846,23 @@ pub fn remove_custom(layout: &Layout, kind: Kind, id: &str) -> Result<()> {
 pub fn cape_preview(img: &Rgba) -> Rgba {
     let s = img.width / 64; // texels per cape unit
     crop(img, s, s, 10 * s, 16 * s)
+}
+
+/// Preview for validated cape bytes: the outer face for PNGs and GIF cape
+/// sheets; for other GIFs (fitted onto the faces by the mod) the first
+/// frame, centre-cropped to the face's 10:16 shape.
+pub fn cape_preview_bytes(bytes: &[u8]) -> std::result::Result<Rgba, String> {
+    let img = validate_image(Kind::Cape, bytes)?;
+    if is_gif(bytes) && !is_cape_sheet(img.width, img.height) {
+        let (w, h) = (img.width, img.height);
+        let (cw, ch) = if w * 16 > h * 10 {
+            ((h * 10 / 16).max(1), h)
+        } else {
+            (w, (w * 16 / 10).max(1))
+        };
+        return Ok(crop(&img, (w - cw) / 2, (h - ch) / 2, cw, ch));
+    }
+    Ok(cape_preview(&img))
 }
 
 /// The north/east/south strip of a sky atlas, downscaled to <= `max_w` wide.
@@ -820,9 +1081,14 @@ mod tests {
     fn bundled_assets_pass_validation() {
         let base = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../client/src/main/resources/assets/kestrel/textures");
-        for (id, _) in BUILTIN_CAPES {
-            let b = std::fs::read(base.join(format!("capes/{id}.png"))).unwrap();
-            validate_image(Kind::Cape, &b).unwrap();
+        for c in cape_catalog() {
+            let b = std::fs::read(base.join(&c.texture)).unwrap();
+            validate_image(Kind::Cape, &b).unwrap_or_else(|e| panic!("{}: {e}", c.id));
+            if let Some(f) = &c.fallback {
+                let b = std::fs::read(base.join(f)).unwrap();
+                assert!(!is_gif(&b), "{}: fallback must be a PNG", c.id);
+                validate_image(Kind::Cape, &b).unwrap_or_else(|e| panic!("{}: {e}", c.id));
+            }
         }
         for (id, _) in BUILTIN_SKIES {
             let b = std::fs::read(base.join(format!("sky/{id}.png"))).unwrap();
@@ -882,5 +1148,222 @@ mod tests {
         std::fs::write(client_config_path(&l), br#"{"qol": {"fullbright": "yes"}}"#).unwrap();
         assert!(!load_state(&l).settings.qol.fullbright);
         assert!(save_fullbright(&l, true).unwrap().settings.qol.fullbright);
+    }
+
+    const TETO_OWNER: &str = "ba14933e-a7ad-4816-8696-a788cc1b3c1f";
+
+    #[test]
+    fn catalog_keeps_existing_capes_and_restricts_teto() {
+        let cat = parse_catalog(CAPE_CATALOG_JSON).unwrap();
+        assert_eq!(cat.len(), cape_catalog().len());
+        let get = |id: &str| cat.iter().find(|c| c.id == id).unwrap();
+        for id in ["ember", "glacier", "midnight", "verdant", "aurora"] {
+            assert!(!get(id).restricted(), "{id}");
+            assert!(get(id).allows(None), "{id}");
+        }
+        let teto = get("teto");
+        assert!(teto.restricted());
+        assert_eq!(teto.texture, "capes/teto.gif");
+        assert_eq!(teto.fallback.as_deref(), Some("capes/teto.png"));
+        assert!(teto.allows(Some(TETO_OWNER)));
+        assert!(teto.allows(Some("BA14933EA7AD48168696A788CC1B3C1F")));
+        assert!(teto.allows(Some("ba14933ea7ad48168696a788cc1b3c1f")));
+        assert!(!teto.allows(Some("ba14933e-a7ad-4816-8696-a788cc1b3c1e")));
+        assert!(!teto.allows(Some("bringing")));
+        assert!(!teto.allows(Some("")));
+        assert!(!teto.allows(None));
+        // An offline session named "bringing" gets the OfflinePlayer UUID, not the owner's.
+        let offline = crate::auth::Session::offline("bringing");
+        assert!(!teto.allows(Some(&offline.uuid)));
+    }
+
+    #[test]
+    fn catalog_rejects_bad_owners_and_duplicates() {
+        let bad_owner =
+            r#"{"capes":[{"id":"x","name":"X","texture":"capes/x.png","owners":["bringing"]}]}"#;
+        assert!(parse_catalog(bad_owner).is_err());
+        let dup = r#"{"capes":[{"id":"x","name":"X","texture":"a.png"},{"id":"x","name":"Y","texture":"b.png"}]}"#;
+        assert!(parse_catalog(dup).is_err());
+        let none = r#"{"capes":[{"id":"none","name":"X","texture":"a.png"}]}"#;
+        assert!(parse_catalog(none).is_err());
+        let empty = r#"{"capes":[{"id":"x","name":"X","texture":"a.png","owners":[]}]}"#;
+        let c = parse_catalog(empty).unwrap();
+        assert!(c[0].restricted());
+        assert!(
+            !c[0].allows(Some(TETO_OWNER)),
+            "empty owner list allows nobody"
+        );
+    }
+
+    #[test]
+    fn uuid_normalisation() {
+        assert_eq!(
+            normalize_uuid(TETO_OWNER).as_deref(),
+            Some("ba14933ea7ad48168696a788cc1b3c1f")
+        );
+        assert_eq!(
+            normalize_uuid(" BA14933EA7AD48168696A788CC1B3C1F ").as_deref(),
+            Some("ba14933ea7ad48168696a788cc1b3c1f")
+        );
+        assert!(normalize_uuid("ba14933e-a7ad-4816-8696_a788cc1b3c1f").is_none());
+        assert!(normalize_uuid("ba14933ea7ad48168696a788cc1b3c1").is_none());
+        assert!(normalize_uuid("zz14933ea7ad48168696a788cc1b3c1f").is_none());
+        assert!(normalize_uuid("ba14933ea7ad-4816-8696-a788cc1b3c1f-").is_none());
+    }
+
+    #[test]
+    fn show_assigned_capes_defaults_on_and_round_trips() {
+        let (_d, l) = layout();
+        assert!(load_state(&l).settings.cosmetics.show_assigned_capes);
+        // A request written by an older launcher has no such field.
+        std::fs::create_dir_all(l.client_data()).unwrap();
+        std::fs::write(
+            request_path(&l),
+            r#"{"revision":3,"cosmetics":{"capesEnabled":true,"cape":"ember","animatedCapes":true},
+               "sky":{"enabled":false,"preset":"dusk","brightness":1.0,"rotate":true},
+               "killEffects":{"enabled":true,"effect":"burst","intensity":1.0,"sounds":true,"color":4293427002}}"#,
+        )
+        .unwrap();
+        assert!(load_state(&l).settings.cosmetics.show_assigned_capes);
+        let mut s = load_state(&l).settings;
+        s.cosmetics.show_assigned_capes = false;
+        save_request(&l, &s).unwrap();
+        let raw: Value = serde_json::from_slice(&std::fs::read(request_path(&l)).unwrap()).unwrap();
+        assert_eq!(raw["cosmetics"]["showAssignedCapes"], Value::Bool(false));
+        assert!(!load_state(&l).settings.cosmetics.show_assigned_capes);
+        // The mod's config is read too.
+        std::fs::write(
+            client_config_path(&l),
+            r#"{"lastLauncherCosmeticsRevision": 99999999999999, "cosmetics": {"showAssignedCapes": true}}"#,
+        )
+        .unwrap();
+        assert!(load_state(&l).settings.cosmetics.show_assigned_capes);
+    }
+
+    /// Encode a GIF with the given frames (rgba, w, h, left, top).
+    fn gif_bytes(sw: u16, sh: u16, frames: &[(Vec<u8>, u16, u16, u16, u16)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut enc = gif::Encoder::new(&mut out, sw, sh, &[]).unwrap();
+            for (rgba, w, h, x, y) in frames {
+                let mut px = rgba.clone();
+                let mut f = gif::Frame::from_rgba_speed(*w, *h, &mut px, 30);
+                f.left = *x;
+                f.top = *y;
+                f.delay = 7;
+                enc.write_frame(&f).unwrap();
+            }
+        }
+        out
+    }
+
+    fn solid(w: u16, h: u16, rgba: [u8; 4]) -> Vec<u8> {
+        (0..u32::from(w) * u32::from(h))
+            .flat_map(|_| rgba)
+            .collect()
+    }
+
+    #[test]
+    fn gif_capes_validate_like_the_mod() {
+        // Arbitrary picture (fitted onto both faces by the mod).
+        let pic = gif_bytes(
+            30,
+            60,
+            &[
+                (solid(30, 60, [255, 0, 0, 255]), 30, 60, 0, 0),
+                (solid(10, 10, [0, 0, 255, 255]), 10, 10, 5, 5),
+            ],
+        );
+        let first = validate_image(Kind::Cape, &pic).unwrap();
+        assert_eq!((first.width, first.height), (30, 60));
+        let prev = cape_preview_bytes(&pic).unwrap();
+        assert_eq!((prev.width, prev.height), (30, 48)); // centre-cropped to 10:16
+        assert_eq!(&prev.pixels[..4], &[255, 0, 0, 255]);
+
+        // A GIF that is already a cape sheet previews its outer face.
+        let sheet = gif_bytes(64, 32, &[(solid(64, 32, [0, 255, 0, 255]), 64, 32, 0, 0)]);
+        let prev = cape_preview_bytes(&sheet).unwrap();
+        assert_eq!((prev.width, prev.height), (10, 16));
+
+        // Oversized logical screen, too many frames, garbage, truncated.
+        let big = gif_bytes(1025, 10, &[(solid(1, 1, [1, 1, 1, 255]), 1, 1, 0, 0)]);
+        assert!(
+            validate_image(Kind::Cape, &big)
+                .unwrap_err()
+                .contains("too large")
+        );
+        let many: Vec<_> = (0..129)
+            .map(|_| (solid(1, 1, [1, 2, 3, 255]), 1u16, 1u16, 0u16, 0u16))
+            .collect();
+        assert!(
+            validate_image(Kind::Cape, &gif_bytes(1, 1, &many))
+                .unwrap_err()
+                .contains("too many frames")
+        );
+        let mut junk = b"GIF89a".to_vec();
+        junk.extend_from_slice(&[0xFF; 40]);
+        assert!(validate_image(Kind::Cape, &junk).is_err());
+        for cut in [10, 20, pic.len() / 2, pic.len() - 2] {
+            let _ = validate_image(Kind::Cape, &pic[..cut]); // must not panic
+        }
+        // GIFs are capes only.
+        assert!(validate_image(Kind::Sky, &pic).is_err());
+    }
+
+    #[test]
+    fn texel_budget_matches_the_mod() {
+        // 64 frames of a 512x256 sheet = 8M texels: fine; 1024x512 x 24 frames = 12.6M: too large.
+        let ok: Vec<_> = (0..2)
+            .map(|_| (solid(1, 1, [9, 9, 9, 255]), 1u16, 1u16, 0u16, 0u16))
+            .collect();
+        assert!(validate_image(Kind::Cape, &gif_bytes(512, 256, &ok)).is_ok());
+        let heavy: Vec<_> = (0..25)
+            .map(|_| (solid(1, 1, [9, 9, 9, 255]), 1u16, 1u16, 0u16, 0u16))
+            .collect();
+        assert!(
+            validate_image(Kind::Cape, &gif_bytes(1024, 512, &heavy))
+                .unwrap_err()
+                .contains("too large")
+        );
+    }
+
+    #[test]
+    fn gif_import_keeps_gif_extension_and_is_listed() {
+        let (d, l) = layout();
+        let src = d.path().join("teto dance.gif");
+        std::fs::write(
+            &src,
+            gif_bytes(30, 60, &[(solid(30, 60, [255, 0, 0, 255]), 30, 60, 0, 0)]),
+        )
+        .unwrap();
+        let id = import(&l, Kind::Cape, &src).unwrap();
+        assert_eq!(id, "custom:teto_dance.gif");
+        assert_eq!(import(&l, Kind::Cape, &src).unwrap(), id, "deduplicated");
+        assert_eq!(
+            list_custom(&l, Kind::Cape),
+            vec!["teto_dance.gif".to_string()]
+        );
+        // A GIF dropped into the skies folder is not offered as a sky.
+        std::fs::create_dir_all(skies_dir(&l)).unwrap();
+        std::fs::copy(&src, skies_dir(&l).join("x.gif")).unwrap();
+        assert!(list_custom(&l, Kind::Sky).is_empty());
+        // PNG capes keep the 2 MB limit even though GIFs may be 4 MB.
+        let big_png = d.path().join("big.png");
+        let mut b = png_bytes(64, 32);
+        b.resize(3 * 1024 * 1024, 0);
+        std::fs::write(&big_png, b).unwrap();
+        assert!(import(&l, Kind::Cape, &big_png).is_err());
+    }
+
+    #[test]
+    fn bundled_teto_gif_validates() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../client/src/main/resources/assets/kestrel/textures");
+        let b = std::fs::read(base.join("capes/teto.gif")).unwrap();
+        let first = validate_cape_gif(&b).unwrap();
+        assert_eq!((first.width, first.height), (231, 498));
+        let prev = cape_preview_bytes(&b).unwrap();
+        // 231 wide -> 231 * 16 / 10 = 369 rows, centred.
+        assert_eq!((prev.width, prev.height), (231, 369));
     }
 }

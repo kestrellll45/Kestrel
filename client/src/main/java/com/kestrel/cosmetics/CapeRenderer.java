@@ -11,13 +11,15 @@ import net.minecraftforge.client.event.RenderPlayerEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
 /**
- * Renders the selected cape on the local player.
+ * Renders Kestrel capes: your selected cape on your own player, and capes the
+ * bundled catalog assigns to specific UUIDs on those players.
  *
  * <p>Uses only Forge's RenderPlayerEvent (no mixins): after the player is
  * drawn we rebuild the same model transform RendererLivingEntity uses and
  * then run vanilla LayerCape's motion maths, so the cape swings exactly like
  * a vanilla cape. If the player already has an official cape, vanilla draws
- * that one and we draw nothing (no z-fighting).
+ * that one and we draw nothing (no z-fighting). Players who hide their cape
+ * in Skin Customization are respected.
  */
 public final class CapeRenderer {
     private final KestrelClient client;
@@ -31,9 +33,11 @@ public final class CapeRenderer {
         if (!(event.entityPlayer instanceof AbstractClientPlayer)) return;
         AbstractClientPlayer player = (AbstractClientPlayer) event.entityPlayer;
         Minecraft mc = Minecraft.getMinecraft();
-        if (player != mc.thePlayer) return;
-        ResourceLocation tex = client.capes().currentTexture();
-        if (tex == null) return; // disabled or nothing selected: no GL work at all
+        // Cheapest test first: for most players this is one HashMap miss.
+        ResourceLocation tex = player == mc.thePlayer
+                ? client.capes().currentTexture()
+                : client.capes().assignedTexture(player.getUniqueID());
+        if (tex == null) return; // disabled or nothing to draw: no GL work at all
         if (player.isInvisible() || !player.isWearing(EnumPlayerModelParts.CAPE)) return;
         if (player.getLocationCape() != null) return;
 

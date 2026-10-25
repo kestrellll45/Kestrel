@@ -69,4 +69,17 @@ public class CosmeticsRequestTest {
         assertTrue(CosmeticsRequest.apply(c, "{\"revision\": 9, \"qol\": null}"));
         assertTrue(c.qol.fullbright);
     }
+
+    @Test
+    public void showAssignedCapesIsCopiedAndDefaultsToOn() {
+        ClientConfig c = new ClientConfig();
+        c.validate();
+        assertTrue(c.cosmetics.showAssignedCapes);
+        assertTrue(CosmeticsRequest.apply(c, "{\"revision\": 5, \"cosmetics\": {\"cape\": \"teto\", \"showAssignedCapes\": false}}"));
+        assertFalse(c.cosmetics.showAssignedCapes);
+        assertEquals("teto", c.cosmetics.cape); // stored as-is; CapeManager enforces ownership at render time
+        // Older launchers do not send the field: keep the current value.
+        assertTrue(CosmeticsRequest.apply(c, "{\"revision\": 6, \"cosmetics\": {\"cape\": \"ember\"}}"));
+        assertFalse(c.cosmetics.showAssignedCapes);
+    }
 }

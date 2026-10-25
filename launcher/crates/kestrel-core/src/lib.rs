@@ -8,6 +8,7 @@ pub mod assets;
 pub mod auth;
 pub mod config;
 pub mod cosmetics;
+pub mod discord;
 pub mod download;
 pub mod error;
 pub mod forge;

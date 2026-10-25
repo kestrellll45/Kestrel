@@ -36,6 +36,7 @@ public final class CosmeticsRequest {
             c.cosmetics.capesEnabled = bool(cos, "capesEnabled", c.cosmetics.capesEnabled);
             c.cosmetics.cape = str(cos, "cape", c.cosmetics.cape);
             c.cosmetics.animatedCapes = bool(cos, "animatedCapes", c.cosmetics.animatedCapes);
+            c.cosmetics.showAssignedCapes = bool(cos, "showAssignedCapes", c.cosmetics.showAssignedCapes);
         }
         JsonObject sky = obj(o, "sky");
         if (sky != null) {

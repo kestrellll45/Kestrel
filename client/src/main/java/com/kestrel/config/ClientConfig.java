@@ -88,9 +88,11 @@ public final class ClientConfig {
 
     public static final class Cosmetics {
         public boolean capesEnabled = true;
-        /** Cape id: "none", a bundled preset id, or "custom:<file name>". */
+        /** Cape id: "none", a catalog id (capes.json), or "custom:<file name>" (PNG or GIF). */
         public String cape = "none";
         public boolean animatedCapes = true;
+        /** Draw capes the bundled catalog assigns to specific players (by UUID) on those players. */
+        public boolean showAssignedCapes = true;
         /** Frames per second for animated capes. */
         public int animationFps = 10;
 

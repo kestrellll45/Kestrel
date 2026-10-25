@@ -17,12 +17,78 @@ use crate::{LAUNCHER_BRAND, LAUNCHER_VERSION};
 /// Marker the client mod prints once it has fully initialised.
 pub const MOD_READY_MARKER: &str = "[Kestrel] Client initialized";
 pub const FORGE_MARKER: &str = "Forge Mod Loader version";
+/// The mod prints `[Kestrel] activity <token>: <menu|singleplayer|multiplayer>`
+/// whenever the player's situation changes (`ActivityReporter.java`). The
+/// per-launch token keeps chat messages from spoofing the state.
+pub const ACTIVITY_MARKER: &str = "[Kestrel] activity ";
 
 #[derive(Debug, Clone)]
 pub struct LaunchSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub cwd: PathBuf,
+    /// Random per launch; passed to the mod as `-Dkestrel.activityToken`.
+    pub activity_token: String,
+}
+
+/// What the player is doing in game, as reported by the mod.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameActivity {
+    MainMenu,
+    Singleplayer,
+    Multiplayer,
+}
+
+impl GameActivity {
+    pub fn id(self) -> &'static str {
+        match self {
+            GameActivity::MainMenu => "menu",
+            GameActivity::Singleplayer => "singleplayer",
+            GameActivity::Multiplayer => "multiplayer",
+        }
+    }
+
+    fn from_id(s: &str) -> Option<GameActivity> {
+        match s {
+            "menu" => Some(GameActivity::MainMenu),
+            "singleplayer" => Some(GameActivity::Singleplayer),
+            "multiplayer" => Some(GameActivity::Multiplayer),
+            _ => None,
+        }
+    }
+}
+
+/// Parse an activity marker carrying this launch's token. Lines without the
+/// exact token (including chat that merely quotes the marker) are ignored.
+pub fn parse_activity(line: &str, token: &str) -> Option<GameActivity> {
+    if token.is_empty() {
+        return None;
+    }
+    let needle = format!("{ACTIVITY_MARKER}{token}: ");
+    let rest = &line[line.find(&needle)? + needle.len()..];
+    let word: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_lowercase())
+        .collect();
+    GameActivity::from_id(&word)
+}
+
+/// 128 random bits as hex, from the standard library's OS-seeded hasher keys.
+fn new_activity_token() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut out = String::with_capacity(32);
+    for i in 0..2u64 {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(i);
+        h.write_u128(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        );
+        out.push_str(&format!("{:016x}", h.finish()));
+    }
+    out
 }
 
 /// Tuned defaults for 1.8.9 on Java 8: G1 with short pauses. Kept modest;
@@ -78,6 +144,8 @@ pub fn build(
         cfg.game_preset.id()
     ));
     args.push(format!("-Dkestrel.launcherVersion={LAUNCHER_VERSION}"));
+    let activity_token = new_activity_token();
+    args.push(format!("-Dkestrel.activityToken={activity_token}"));
 
     let cp = state
         .classpath
@@ -123,6 +191,7 @@ pub fn build(
         program: java.to_path_buf(),
         args,
         cwd: game_dir,
+        activity_token,
     })
 }
 
@@ -132,6 +201,7 @@ pub enum GameEvent {
     Line(String),
     ForgeLoaded,
     ModReady,
+    Activity(GameActivity),
     Exited(Option<i32>),
 }
 
@@ -204,9 +274,10 @@ pub fn spawn(spec: &LaunchSpec, layout: &Layout, events: Sender<GameEvent>) -> R
         let Some(stream) = stream else { continue };
         let events = events.clone();
         let log_file = log_file.clone();
+        let token = spec.activity_token.clone();
         std::thread::Builder::new()
             .name(format!("game-{tag}"))
-            .spawn(move || pump(stream, &log_file, &events))
+            .spawn(move || pump(stream, &log_file, &events, &token))
             .map_err(|e| Error::Other(e.to_string()))?;
     }
 
@@ -230,6 +301,7 @@ fn pump(
     stream: Box<dyn std::io::Read + Send>,
     log: &std::sync::Mutex<std::fs::File>,
     events: &Sender<GameEvent>,
+    activity_token: &str,
 ) {
     let mut reader = BufReader::new(stream);
     let mut buf = Vec::new();
@@ -247,6 +319,11 @@ fn pump(
                 }
                 if line.contains(MOD_READY_MARKER) {
                     let _ = events.send(GameEvent::ModReady);
+                }
+                if line.contains(ACTIVITY_MARKER)
+                    && let Some(a) = parse_activity(&line, activity_token)
+                {
+                    let _ = events.send(GameEvent::Activity(a));
                 }
                 if events.send(GameEvent::Line(line)).is_err() {
                     // UI gone: keep draining so the game never blocks on a full pipe.
@@ -321,6 +398,8 @@ mod tests {
         );
         // Paths with spaces stay a single argument.
         assert!(a[pos("--gameDir") + 1].contains("Some One"));
+        let tok = format!("-Dkestrel.activityToken={}", spec.activity_token);
+        assert!(pos(&tok) < pos("-cp"), "token is a JVM property");
         assert!(
             a.iter()
                 .any(|x| x == "-Dkestrel.requestedPreset=competitive")
@@ -341,5 +420,46 @@ mod tests {
             &Platform::windows_x64(),
         );
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn activity_markers_need_this_launchs_token() {
+        let t = "0123456789abcdef0123456789abcdef";
+        let line = format!("[12:00:00] [Client thread/INFO]: [Kestrel] activity {t}: multiplayer");
+        assert_eq!(parse_activity(&line, t), Some(GameActivity::Multiplayer));
+        // Mojang's XML console layout wraps the message in CDATA.
+        let xml =
+            format!("    <log4j:Message><![CDATA[[Kestrel] activity {t}: menu]]></log4j:Message>");
+        assert_eq!(parse_activity(&xml, t), Some(GameActivity::MainMenu));
+        assert_eq!(
+            parse_activity(&format!("[Kestrel] activity {t}: singleplayer"), t),
+            Some(GameActivity::Singleplayer)
+        );
+        // Chat can quote the marker but cannot know the token.
+        assert_eq!(
+            parse_activity("[CHAT] <x> [Kestrel] activity : multiplayer", t),
+            None
+        );
+        assert_eq!(
+            parse_activity("[CHAT] [Kestrel] activity deadbeef: multiplayer", t),
+            None
+        );
+        assert_eq!(
+            parse_activity(&format!("[Kestrel] activity {t}: lobby"), t),
+            None
+        );
+        assert_eq!(
+            parse_activity(&format!("[Kestrel] activity {t}: menu"), ""),
+            None
+        );
+    }
+
+    #[test]
+    fn each_launch_gets_a_fresh_token() {
+        let a = new_activity_token();
+        let b = new_activity_token();
+        assert_eq!(a.len(), 32);
+        assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
     }
 }

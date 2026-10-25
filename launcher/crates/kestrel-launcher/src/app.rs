@@ -5,14 +5,16 @@ use std::time::Duration;
 use egui::{Color32, CornerRadius, RichText, Stroke, Vec2};
 use kestrel_core::auth::{self, DeviceCode, StoredAccount};
 use kestrel_core::config::{GamePreset, LauncherConfig};
+use kestrel_core::discord::{self, PresenceService};
 use kestrel_core::install::InstallState;
-use kestrel_core::launch::GameEvent;
+use kestrel_core::launch::{GameActivity, GameEvent};
 use kestrel_core::paths::Layout;
 use kestrel_core::progress::{Progress, SharedProgress};
 use kestrel_core::{FORGE_VERSION, LAUNCHER_VERSION, MC_VERSION, runtime, sysmem};
 
 use crate::cosmetics_page::CosmeticsPage;
 use crate::logger::LogBuffer;
+use crate::presence::{self, Phase};
 use crate::qol_page::QolPage;
 use crate::updater::Updater;
 use crate::worker::{self, Msg, PlayRequest};
@@ -80,6 +82,11 @@ pub struct LauncherApp {
     cosmetics: CosmeticsPage,
     qol: QolPage,
     updater: Updater,
+    /// Discord Rich Presence (background thread; no-op until configured).
+    discord: PresenceService,
+    launcher_started: u64,
+    game_started: Option<u64>,
+    game_activity: Option<GameActivity>,
 }
 
 impl LauncherApp {
@@ -133,6 +140,10 @@ impl LauncherApp {
             qol: QolPage::new(layout_for_cosmetics.clone()),
             cosmetics: CosmeticsPage::new(layout_for_cosmetics),
             updater,
+            discord: PresenceService::start(discord::system_connector()),
+            launcher_started: presence::now_unix(),
+            game_started: None,
+            game_activity: None,
         }
     }
 
@@ -182,6 +193,8 @@ impl LauncherApp {
         self.forge_seen = false;
         self.mod_seen = false;
         self.game_lines.clear();
+        self.game_started = Some(presence::now_unix());
+        self.game_activity = None;
         let req = PlayRequest {
             layout: self.layout.clone(),
             cfg: self.cfg.clone(),
@@ -236,6 +249,8 @@ impl LauncherApp {
                 }
                 Msg::LaunchFailed(e) => {
                     self.busy = Busy::Idle;
+                    self.game_started = None;
+                    self.game_activity = None;
                     self.install = InstallState::load(&self.layout.install_state());
                     self.status = Some(Status::Error(e));
                 }
@@ -246,6 +261,7 @@ impl LauncherApp {
                     self.game_lines.push(l);
                 }
                 Msg::Game(GameEvent::ForgeLoaded) => self.forge_seen = true,
+                Msg::Game(GameEvent::Activity(a)) => self.game_activity = Some(a),
                 Msg::Game(GameEvent::ModReady) => {
                     self.mod_seen = true;
                     self.status = Some(Status::Ok(
@@ -257,6 +273,8 @@ impl LauncherApp {
                 }
                 Msg::Game(GameEvent::Exited(code)) => {
                     self.busy = Busy::Idle;
+                    self.game_started = None;
+                    self.game_activity = None;
                     self.status = Some(match code {
                         Some(0) => Status::Info("Minecraft closed.".into()),
                         c => Status::Error(format!(
@@ -273,6 +291,21 @@ impl LauncherApp {
                 Msg::JavaProbe(r) => self.java_probe = Some(r),
             }
         }
+    }
+
+    /// Push the current state to Discord (dropped when unchanged; never blocks).
+    fn sync_discord(&mut self) {
+        let phase = match self.busy {
+            Busy::Launching => Phase::Starting,
+            Busy::Running => Phase::Running(self.game_activity),
+            Busy::Idle | Busy::Installing | Busy::SigningIn => Phase::Launcher,
+        };
+        self.discord.set(presence::desired(
+            &self.cfg,
+            phase,
+            self.launcher_started,
+            self.game_started,
+        ));
     }
 
     // ---- pages --------------------------------------------------------------
@@ -708,6 +741,51 @@ impl LauncherApp {
                     }
                 }
             }
+            ui.add_space(6.0);
+            dirty |= ui
+                .checkbox(
+                    &mut self.cfg.discord_rpc_enabled,
+                    "Discord Rich Presence (show Kestrel and your game state in Discord)",
+                )
+                .changed();
+            ui.add_enabled_ui(self.cfg.discord_rpc_enabled, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Discord application ID");
+                    dirty |= ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.cfg.discord_client_id)
+                                .hint_text("e.g. 123456789012345678")
+                                .desired_width(220.0),
+                        )
+                        .changed();
+                });
+                let (text, color) = match (
+                    discord::validate_client_id(&self.cfg.discord_client_id),
+                    self.discord.status(),
+                ) {
+                    (Err(_), _) if self.cfg.discord_client_id.trim().is_empty() => (
+                        "Not configured: create an application named \"Kestrel\" at discord.com/developers, \
+                         upload an art asset named \"kestrel\", and paste its Application ID here."
+                            .to_string(),
+                        MUTED,
+                    ),
+                    (Err(e), _) => (e, WARN),
+                    (Ok(_), discord::Status::Connected) => ("Connected to Discord.".into(), OK),
+                    (Ok(_), discord::Status::Waiting(m)) => (format!("{m}; retrying in the background."), MUTED),
+                    (Ok(_), discord::Status::Error(m)) => (m, ERR),
+                    (Ok(_), _) => ("Connecting to Discord…".into(), MUTED),
+                };
+                ui.label(RichText::new(text).small().color(color));
+                ui.label(
+                    RichText::new(
+                        "Shows only: in the launcher / starting / main menu / singleplayer / multiplayer, with elapsed time. \
+                         Never server addresses, world names or account details.",
+                    )
+                    .small()
+                    .color(MUTED),
+                );
+            });
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.label("Download threads");
                 dirty |= ui
@@ -844,7 +922,8 @@ impl LauncherApp {
         ui.add_space(10.0);
         card(ui, |ui| {
             ui.label(RichText::new("Notes").strong());
-            ui.label("• Capes, skies and kill effects are rendered on your client only. Other players do not see them.");
+            ui.label("• Capes, skies and kill effects are rendered on your client only. Other players do not see them \
+                      (except capes the bundled catalog assigns to a specific player, which Kestrel clients draw on that player).");
             ui.label("• Kestrel installs into its own directory and never modifies your normal .minecraft folder.");
             ui.label("• Game files are downloaded from Mojang and Forge servers and verified by SHA-1 where hashes are published.");
             ui.label("• Not affiliated with Mojang or Microsoft.");
@@ -855,6 +934,7 @@ impl LauncherApp {
 impl eframe::App for LauncherApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_messages();
+        self.sync_discord();
         let ctx = ui.ctx().clone();
         if self.busy != Busy::Idle {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -952,7 +1032,17 @@ impl eframe::App for LauncherApp {
                         Page::Account => self.account_page(ui),
                         Page::Settings => self.settings(ui),
                         Page::Performance => self.performance(ui),
-                        Page::Cosmetics => self.cosmetics.ui(ui, self.busy == Busy::Running),
+                        Page::Cosmetics => {
+                            // Restricted catalog capes are offered only to the
+                            // signed-in Microsoft account that owns them.
+                            let uuid = self
+                                .account
+                                .as_ref()
+                                .filter(|_| !self.offline_mode)
+                                .map(|a| a.uuid.as_str());
+                            self.cosmetics.set_account(uuid);
+                            self.cosmetics.ui(ui, self.busy == Busy::Running)
+                        }
                         Page::Qol => self.qol.ui(
                             ui,
                             self.busy != Busy::Idle && self.busy != Busy::SigningIn,

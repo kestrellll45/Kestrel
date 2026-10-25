@@ -17,7 +17,7 @@ Kestrel.exe (Rust, egui)                      Minecraft 1.8.9 (Java 8, separate 
    └─ resourcepacks  packs + options.txt         └─ gui         settings screen, widgets
 ```
 
-The launcher and the mod share exactly three things:
+The launcher and the mod share exactly four things:
 
 1. The game directory layout (`<root>/instance` is `--gameDir`; the mod keeps its data in
    `<root>/instance/kestrel`). The QoL page manages `instance/mods` and the resource-pack
@@ -27,6 +27,10 @@ The launcher and the mod share exactly three things:
    the launcher watches for to confirm the mod loaded.
 3. The launcher request file `instance/kestrel/launcher-cosmetics.json` (cosmetics and
    Fullbright; see "Cosmetics page" below).
+4. The cape catalog `client/src/main/resources/assets/kestrel/capes.json`, compiled into
+   both (see [CAPES.md](CAPES.md)), and the activity marker
+   `[Kestrel] activity <token>: <state>` with `-Dkestrel.activityToken` for Discord Rich
+   Presence (see [DISCORD.md](DISCORD.md)).
 
 ## Launcher
 
@@ -120,7 +124,9 @@ threads and cached as textures; bundled textures are embedded from the mod's res
 the launcher and the game show the same art.
 
 All cosmetics are **local**: rendered only by your client. Nothing is sent to servers, so
-other players see them only if they run a compatible client that implements them.
+other players see them only if they run a compatible client that implements them. Restricted
+catalog capes are the one case where Kestrel draws a cape on another player: the catalog
+assigns them to that player's UUID (see [CAPES.md](CAPES.md)).
 
 ## Client mod
 
@@ -133,7 +139,8 @@ performance patches):
 | Crosshair | `RenderGameOverlayEvent.Pre(CROSSHAIRS)` cancelled only when custom is on |
 | Toggle sprint | `ClientTickEvent` + `KeyBinding.setKeyBindState`; vanilla sprint rules still apply |
 | CPS | `MouseEvent` (in-game only; no global hooks) |
-| Capes | `RenderPlayerEvent.Post`, local player only, replicating `RendererLivingEntity` transforms and vanilla `LayerCape` motion |
+| Capes | `RenderPlayerEvent.Post`: your selected cape on you, catalog-assigned capes on their owners (UUID); replicates `RendererLivingEntity` transforms and vanilla `LayerCape` motion. PNG strips and GIFs (own compositing, per-frame timing), see CAPES.md |
+| Activity (Discord) | `ClientTickEvent`: logs `[Kestrel] activity <token>: menu/singleplayer/multiplayer` on change |
 | Skies | Forge `WorldProvider#setSkyRenderer` (Overworld only; uninstalled when disabled) |
 | Kill effects | `AttackEntityEvent` (who you hit) + `ClientTickEvent` (health ≤ 0) + `ClientChatReceivedEvent` (kill feed naming you and the victim) → `KillEffectManager` |
 | Frame stats | `RenderTickEvent` (ring buffer, avg + 1% low) |
@@ -162,6 +169,14 @@ Verified in the development environment (Linux, no access to Mojang/Forge/Gradle
   equip → request file); a Rust-written request was applied by the mod's Java code.
 - Mod: 19 JUnit tests pass (config load/migrate/malformed handling, presets, image
   validation, frame stats, CPS, kill-message matching) against Minecraft's own Gson 2.2.4.
+
+- Capes/GIF/Discord (0.4.0 work, Linux dev environment): 65 JUnit tests (GIF compositing incl.
+  disposal/transparency/malformed input, Teto frames bit-identical to Pillow, layout,
+  catalog + UUID restriction, fallback = frame 0, activity marker) and 130 Rust tests
+  (catalog parity, GIF validation limits, imports, Discord IPC end to end against a fake
+  Discord server incl. reconnect and clear-on-exit, activity parsing). New Java files were
+  type-checked against stubs of the Minecraft/Forge APIs they use, not against real 1.8.9
+  classes; the Windows named-pipe branch of `discord.rs` was not compiled.
 
 **Not yet verified** (needs a Windows machine with internet):
 
