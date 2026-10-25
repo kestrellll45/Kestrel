@@ -96,6 +96,9 @@ pub struct LauncherConfig {
     /// Discord application ID of the "Kestrel" app (Developer Portal). Empty
     /// = Rich Presence not configured.
     pub discord_client_id: String,
+    /// Launcher renderer: `auto` (OpenGL on Windows), `opengl` or `direct3d`.
+    /// Takes effect on the next start.
+    pub renderer: String,
 }
 
 impl Default for LauncherConfig {
@@ -120,6 +123,7 @@ impl Default for LauncherConfig {
             update_required_minimum: String::new(),
             discord_rpc_enabled: true,
             discord_client_id: String::new(),
+            renderer: "auto".into(),
         }
     }
 }
@@ -183,6 +187,9 @@ impl LauncherConfig {
         self.offline_name = sanitize_name(&self.offline_name);
         self.msa_client_id = self.msa_client_id.trim().to_string();
         self.custom_java_path = self.custom_java_path.trim().to_string();
+        if !matches!(self.renderer.as_str(), "auto" | "opengl" | "direct3d") {
+            self.renderer = "auto".into();
+        }
     }
 
     /// Extra JVM args split on whitespace. Arguments that would override

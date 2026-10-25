@@ -90,11 +90,18 @@ Minecraft token is fetched fresh at each launch.
 
 ### Graphics fallback
 
-The launcher renders with wgpu by default (Direct3D 12 on Windows; adapters ranked discrete
-GPU → integrated → virtual → software/WARP). If the renderer cannot start, the exe relaunches
-itself with `--renderer glow --no-fallback` (winit allows one event loop per process). If that
-fails too, a Windows error box explains why and where the log is. The working renderer is
-remembered in `<root>/renderer.txt`; startup and adapter choice are always logged.
+On Windows the launcher renders with OpenGL (glow) by default; elsewhere with wgpu
+(adapters ranked discrete GPU → integrated → virtual → software/WARP; Direct3D 12 on
+Windows). Direct3D 12 is not the Windows default because its flip-model presentation can be
+put on a hardware overlay plane (Multi-Plane Overlay); on affected NVIDIA/Windows 10 systems
+that made the window flash washed-out frames and the desktop stutter whenever the launcher
+redrew or moved, which OpenGL avoids. Settings → Advanced → Renderer (Automatic / OpenGL /
+Direct3D 12, saved as `renderer` in launcher.json) overrides the default; `--renderer` overrides
+it for one launch. If the renderer cannot start, the exe relaunches itself with the other one
+and `--no-fallback` (winit allows one event loop per process); if that works, it is remembered in
+`<root>/renderer-fallback.txt` and used in Automatic mode. If both fail, a Windows error box
+explains why and where the log is. The old `renderer.txt` (which recorded every success) is
+no longer read. Startup and adapter choice are always logged.
 
 ### Self-update
 

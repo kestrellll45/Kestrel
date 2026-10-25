@@ -65,7 +65,10 @@ fn main() -> eframe::Result {
     install_crash_handler(layout.logs());
     updater::e2e_startup_hook(&args);
 
-    let gfx = graphics::choose(&args, layout.root());
+    let renderer_setting =
+        kestrel_core::config::LauncherConfig::load(&layout.launcher_config()).renderer;
+    let gfx = graphics::choose(&args, layout.root(), &renderer_setting);
+    // `--no-fallback` marks the second attempt, started after the first renderer failed.
     let fallback_allowed = !args.iter().any(|a| a == "--no-fallback");
     log::info!(
         "Kestrel {} starting on {} ({}); renderer {}",
@@ -99,7 +102,10 @@ fn main() -> eframe::Result {
             Box::new(move |cc| {
                 // Reaching this point means the renderer initialised.
                 started_in_app.store(true, std::sync::atomic::Ordering::SeqCst);
-                graphics::remember(&root, gfx);
+                graphics::set_active(gfx);
+                if !fallback_allowed {
+                    graphics::remember_fallback(&root, gfx);
+                }
                 // Tells a launcher that just updated us that we started fine.
                 let updated = updater::on_startup(&layout, &startup_args);
                 Ok(Box::new(app::LauncherApp::new(cc, layout, buffer, updated)))

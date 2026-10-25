@@ -60,6 +60,8 @@ pub struct LauncherApp {
     layout: Layout,
     cfg: LauncherConfig,
     cfg_dirty: bool,
+    /// UI time (s) when unsaved settings were first noticed; saved 1 s later.
+    cfg_dirty_since: Option<f64>,
     page: Page,
     busy: Busy,
     progress: SharedProgress,
@@ -119,6 +121,7 @@ impl LauncherApp {
             layout,
             cfg,
             cfg_dirty: false,
+            cfg_dirty_since: None,
             page: Page::Home,
             busy: Busy::Idle,
             progress: Progress::new(),
@@ -742,6 +745,42 @@ impl LauncherApp {
                 }
             }
             ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label("Renderer");
+                let label = |v: &str| match v {
+                    "opengl" => "OpenGL".to_string(),
+                    "direct3d" => crate::graphics::Gfx::Wgpu.label().to_string(),
+                    _ => format!(
+                        "Automatic ({})",
+                        crate::graphics::platform_default().label()
+                    ),
+                };
+                egui::ComboBox::from_id_salt("renderer")
+                    .selected_text(label(&self.cfg.renderer))
+                    .show_ui(ui, |ui| {
+                        for v in ["auto", "opengl", "direct3d"] {
+                            dirty |= ui
+                                .selectable_value(&mut self.cfg.renderer, v.to_string(), label(v))
+                                .changed();
+                        }
+                    });
+                if let Some(g) = crate::graphics::active() {
+                    ui.label(
+                        RichText::new(format!("in use: {}", g.label()))
+                            .small()
+                            .color(MUTED),
+                    );
+                }
+            });
+            ui.label(
+                RichText::new(
+                    "Takes effect when Kestrel restarts. If the launcher window flickers or the desktop stutters \
+                     while it redraws, use OpenGL.",
+                )
+                .small()
+                .color(MUTED),
+            );
+            ui.add_space(6.0);
             dirty |= ui
                 .checkbox(
                     &mut self.cfg.discord_rpc_enabled,
@@ -1067,12 +1106,18 @@ impl eframe::App for LauncherApp {
         }
 
         // Debounced autosave: settings are written when you leave the page,
-        // start a job, or every couple of seconds while editing.
-        if self.cfg_dirty && ctx.input(|i| i.time) % 2.0 < 0.05 {
-            self.save_config();
+        // start a job, or one second after the first unsaved change.
+        if self.cfg_dirty {
+            let now = ctx.input(|i| i.time);
+            let since = *self.cfg_dirty_since.get_or_insert(now);
+            if now - since >= 1.0 {
+                self.save_config();
+            }
         }
         if self.cfg_dirty {
-            ctx.request_repaint_after(Duration::from_millis(500));
+            ctx.request_repaint_after(Duration::from_millis(250));
+        } else {
+            self.cfg_dirty_since = None;
         }
     }
 
