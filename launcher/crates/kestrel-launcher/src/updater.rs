@@ -90,6 +90,9 @@ pub struct Updater {
     last_check: Option<Instant>,
     /// Set only after the new launcher confirmed a healthy start.
     restart_confirmed: bool,
+    /// Show optional updates automatically ("Automatically check" setting).
+    /// Required updates are always checked for and shown.
+    prompt_optional: bool,
 }
 
 impl Updater {
@@ -113,8 +116,11 @@ impl Updater {
             rx,
             last_check: None,
             restart_confirmed: false,
+            prompt_optional: cfg.update_auto_check,
         };
-        if cfg.update_auto_check && u.source.is_ok() {
+        // Always check at start-up: a required update must be found even when
+        // optional prompts are turned off (they are then simply not shown).
+        if u.source.is_ok() {
             u.check(false, ctx);
         }
         #[cfg(debug_assertions)]
@@ -235,13 +241,64 @@ impl Updater {
             .ok();
     }
 
-    fn poll(&mut self, cfg: &LauncherConfig) {
+    /// The version Minecraft can't be started without, if this launcher is
+    /// older than a signed release's `minimum_supported` (seen in this
+    /// session or remembered from an earlier one). Builds without an update
+    /// source never block.
+    pub fn required_version(&self, cfg: &LauncherConfig) -> Option<Version> {
+        if self.source.is_err() {
+            return None;
+        }
+        update::required_minimum(
+            &self.current,
+            self.release.as_ref(),
+            &cfg.update_required_minimum,
+        )
+    }
+
+    /// Show the update window (Home page "Update now"); checks first when no
+    /// release is known yet, e.g. after starting offline.
+    pub fn open_prompt(&mut self, ctx: &egui::Context) {
+        if self.release.is_some() {
+            if !matches!(self.state, State::Working { .. })
+                && !matches!(self.state, State::Failed(_) | State::Fallback { .. })
+            {
+                self.state = State::Available;
+            }
+            self.show_prompt = true;
+        } else {
+            self.check(true, ctx);
+        }
+    }
+
+    /// Whether a check is running (for the Home page).
+    pub fn is_checking(&self) -> bool {
+        matches!(self.state, State::Checking)
+    }
+
+    /// Returns true when `cfg` changed and must be saved.
+    fn poll(&mut self, cfg: &mut LauncherConfig) -> bool {
+        let mut save = false;
+        let mut remember = |cfg: &mut LauncherConfig, value: String| {
+            if cfg.update_required_minimum != value {
+                log::info!(
+                    "required launcher version: {}",
+                    if value.is_empty() { "none" } else { &value }
+                );
+                cfg.update_required_minimum = value;
+                save = true;
+            }
+        };
         while let Ok(m) = self.rx.try_recv() {
             match m {
                 Msg::Checked { manual, result } => match result {
                     Ok(CheckOutcome::UpToDate { latest }) => {
                         self.release = None;
                         self.state = State::UpToDate { latest };
+                        remember(
+                            cfg,
+                            update::remembered_minimum_after_check(&self.current, None),
+                        );
                     }
                     Ok(CheckOutcome::Available(r)) => {
                         log::info!(
@@ -249,11 +306,16 @@ impl Updater {
                             self.current,
                             r.version
                         );
+                        let required = r.is_required_for(&self.current);
                         self.show_prompt = update::should_prompt(
                             &r,
                             &self.current,
                             &cfg.update_dismissed_version,
                             manual,
+                        ) && (manual || required || self.prompt_optional);
+                        remember(
+                            cfg,
+                            update::remembered_minimum_after_check(&self.current, Some(&r)),
                         );
                         self.release = Some(*r);
                         self.state = State::Available;
@@ -286,6 +348,7 @@ impl Updater {
                 }
             }
         }
+        save
     }
 
     /// Update window (modal). Call every frame.
@@ -295,8 +358,10 @@ impl Updater {
         cfg: &mut LauncherConfig,
         launcher_busy: bool,
     ) -> Actions {
-        self.poll(cfg);
-        let mut actions = Actions::default();
+        let mut actions = Actions {
+            save_config: self.poll(cfg),
+            ..Default::default()
+        };
         // Only close once the new version has reported a healthy start; until
         // then this process must stay alive to roll back if it crashes.
         if self.restart_confirmed {
@@ -376,6 +441,12 @@ impl Updater {
                                 later = true;
                             }
                         });
+                        if required {
+                            ui.label(
+                                RichText::new("This update is required: Minecraft can't be started from this version until it is installed.")
+                                    .color(WARN),
+                            );
+                        }
                         ui.label(
                             RichText::new("Your settings, game files and cosmetics are kept. Kestrel restarts when the update is done.")
                                 .small()
@@ -517,12 +588,17 @@ impl Updater {
                 );
                 return;
             }
-            dirty |= ui
+            if ui
                 .checkbox(
                     &mut cfg.update_auto_check,
-                    "Automatically check for updates when Kestrel starts",
+                    "Show new versions automatically when Kestrel starts",
                 )
-                .changed();
+                .on_hover_text("Required updates are always checked for and shown, because Minecraft can't be started without them.")
+                .changed()
+            {
+                self.prompt_optional = cfg.update_auto_check;
+                dirty = true;
+            }
             ui.horizontal(|ui| {
                 let busy = matches!(self.state, State::Checking | State::Working { .. });
                 if ui

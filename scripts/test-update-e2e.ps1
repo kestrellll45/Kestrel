@@ -8,11 +8,14 @@
   -Mode prepare (default)
     1. Builds the client mod.
     2. Creates a THROW-AWAY test signing key (dist\update-e2e\test-key.txt).
-    3. Builds an "old" Kestrel 0.2.0 and a "new" Kestrel 0.2.1, both with the
+    3. Builds an "old" Kestrel (the current version, e.g. 0.3.0) and a "new"
+       one (patch + 1, e.g. 0.3.1), both with the
        test key, a dummy GitHub update source and the e2e-update-test feature
        (which lets KESTREL_E2E_UPDATE_DIR serve the files from a local folder;
        signature, hash, self-test, swap, restart and rollback are all real).
-    4. Signs a manifest for 0.2.1 into dist\update-e2e\serve\.
+    4. Signs a manifest for the new version into dist\update-e2e\serve\.
+       With -Required it is signed with minimum_supported = the new version,
+       so the old launcher must block Play until it has updated.
     5. Installs the old exe to dist\update-e2e\install\Kestrel.exe and
        dist\update-e2e\install-crash\Kestrel.exe, with a seeded test data
        folder whose file hashes are recorded.
@@ -22,7 +25,7 @@
     Checks the result of run-update.cmd (new version installed, no leftovers,
     test data untouched) and of run-update-crash.cmd (old version restored).
 #>
-param([ValidateSet('prepare', 'verify')][string]$Mode = 'prepare')
+param([ValidateSet('prepare', 'verify')][string]$Mode = 'prepare', [switch]$Required)
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $work = Join-Path $DistDir 'update-e2e'
@@ -30,7 +33,8 @@ $serve = Join-Path $work 'serve'
 $repoUrl = 'https://github.com/kestrel-e2e/kestrel'
 $manifestUrl = "$repoUrl/releases/latest/download/kestrel-update.json"
 $oldVersion = Get-LauncherVersion
-$newVersion = '0.2.1'
+$parsed = [version]($oldVersion -replace '-.*$', '')
+$newVersion = "$($parsed.Major).$($parsed.Minor).$($parsed.Build + 1)"
 
 function Get-Hashes([string]$dir) {
     $h = @{}
@@ -72,8 +76,16 @@ if ($Mode -eq 'verify') {
     Check ($left.Count -eq 0) 'downloaded update removed from data\updates'
     $now = Get-Hashes (Join-Path $work 'data')
     $same = $true
-    foreach ($k in $state.dataHashes.PSObject.Properties.Name) { if ($now[$k] -ne $state.dataHashes.$k) { $same = $false; Write-Host "      changed: $k" } }
-    Check $same 'user data (launcher.json, config.json, cosmetics, accounts.dat) unchanged'
+    foreach ($k in $state.dataHashes.PSObject.Properties.Name) {
+        # The launcher legitimately re-saves launcher.json (e.g. the remembered
+        # required version); there, every seeded setting must keep its value.
+        if ($k -eq '\launcher.json') { continue }
+        if ($now[$k] -ne $state.dataHashes.$k) { $same = $false; Write-Host "      changed: $k" }
+    }
+    Check $same 'user data (config.json, cosmetics, accounts.dat) byte-for-byte unchanged'
+    $cfgNow = Get-Content (Join-Path $work 'data\launcher.json') -Raw | ConvertFrom-Json
+    $kept = ($cfgNow.max_ram_mib -eq 3072) -and ($cfgNow.offline_name -eq 'E2ETester') -and ($cfgNow.update_auto_check -eq $true)
+    Check $kept 'launcher.json settings kept (max_ram_mib, offline_name, update_auto_check)'
     $log = Join-Path $work 'data\logs\launcher.log'
     $prev = Join-Path $work 'data\logs\launcher.prev.log'
     $logs = (Get-Content $log, $prev -Raw -ErrorAction SilentlyContinue) -join "`n"
@@ -159,9 +171,11 @@ End-to-end updater test release.
 - Downloaded from a local folder (test build only)
 - Signature, checksum and self-test are verified as in a real update
 "@
-Invoke-Native $tool @('sign', '--key', $key, '--exe', $newExe, '--version', $newVersion,
+$signArgs = @('sign', '--key', $key, '--exe', $newExe, '--version', $newVersion,
     '--url', "$repoUrl/releases/download/v$newVersion/Kestrel.exe", '--notes', $notes,
     '--manifest-url', $manifestUrl, '--out', (Join-Path $serve 'kestrel-update.json'))
+if ($Required) { $signArgs += @('--minimum', $newVersion) }
+Invoke-Native $tool $signArgs
 Invoke-Native $tool @('verify', '--manifest', (Join-Path $serve 'kestrel-update.json'), '--pubkey', $pub,
     '--manifest-url', $manifestUrl, '--exe', $newExe)
 

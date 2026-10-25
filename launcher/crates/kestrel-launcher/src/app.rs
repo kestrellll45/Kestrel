@@ -164,6 +164,14 @@ impl LauncherApp {
     }
 
     fn play(&mut self, ctx: &egui::Context) {
+        // A signed release marked this version as no longer supported.
+        if let Some(v) = self.updater.required_version(&self.cfg) {
+            self.status = Some(Status::Error(format!(
+                "Kestrel {v} is a required update. Install it before playing."
+            )));
+            self.updater.open_prompt(ctx);
+            return;
+        }
         if !self.offline_mode && self.account.is_none() {
             self.page = Page::Account;
             self.status = Some(Status::Error(
@@ -341,9 +349,40 @@ impl LauncherApp {
 
         ui.add_space(16.0);
         let ctx = ui.ctx().clone();
+        let required = self.updater.required_version(&self.cfg);
+        if let Some(v) = &required {
+            egui::Frame::NONE
+                .fill(Color32::from_rgb(0x3A, 0x2A, 0x12))
+                .stroke(Stroke::new(1.0, WARN))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.label(RichText::new("Update required").strong().color(WARN));
+                    ui.label(format!(
+                        "Kestrel {v} is required to play. This version ({LAUNCHER_VERSION}) can no longer start Minecraft. Your settings, accounts, game files, mods and resource packs are kept."
+                    ));
+                    ui.add_space(4.0);
+                    let checking = self.updater.is_checking();
+                    if ui
+                        .add_enabled(
+                            !checking && self.busy == Busy::Idle,
+                            egui::Button::new(RichText::new("Update now").strong()),
+                        )
+                        .clicked()
+                    {
+                        self.updater.open_prompt(&ctx);
+                    }
+                    if checking {
+                        ui.label(RichText::new("Checking for the update…").color(MUTED));
+                    }
+                });
+            ui.add_space(12.0);
+        }
         ui.horizontal(|ui| {
             let busy = self.busy != Busy::Idle;
+            let play_blocked = busy || required.is_some();
             let label = match self.busy {
+                Busy::Idle if required.is_some() => "UPDATE REQUIRED",
                 Busy::Idle => "PLAY",
                 Busy::Installing => "INSTALLING…",
                 Busy::SigningIn => "SIGNING IN…",
@@ -356,14 +395,14 @@ impl LauncherApp {
                     .strong()
                     .color(Color32::BLACK),
             )
-            .fill(if busy {
+            .fill(if play_blocked {
                 ACCENT.gamma_multiply(0.5)
             } else {
                 ACCENT
             })
             .min_size(Vec2::new(220.0, 56.0))
             .corner_radius(CornerRadius::same(8));
-            if ui.add_enabled(!busy, btn).clicked() {
+            if ui.add_enabled(!play_blocked, btn).clicked() {
                 self.play(&ctx);
             }
             ui.add_space(8.0);

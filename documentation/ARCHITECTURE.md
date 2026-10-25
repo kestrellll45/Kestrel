@@ -13,7 +13,7 @@ Kestrel.exe (Rust, egui)                      Minecraft 1.8.9 (Java 8, separate 
    ├─ auth       Microsoft device-code flow      ├─ rendering   custom skies, fullbright
    ├─ secure     DPAPI token storage             ├─ effects     kill detection + effects
    ├─ config     launcher.json                   ├─ performance frame stats, video presets
-   ├─ mods       QoL mod manager                 ├─ mixin       EntityRenderer (fullbright)
+   ├─ mods       QoL mod manager                 ├─ mixin       EntityRenderer (fullbright, fixed FOV)
    └─ resourcepacks  packs + options.txt         └─ gui         settings screen, widgets
 ```
 

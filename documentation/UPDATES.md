@@ -17,10 +17,11 @@ Your settings, Minecraft files, accounts, logs and cosmetics in
 | Download interrupted, checksum wrong, self-test fails | Nothing is installed; the error is shown with **Retry**. The current version keeps working. |
 | New version crashes on start-up | The old launcher puts itself back automatically and shows what happened. |
 | Kestrel is in a folder you can't write to (e.g. `C:\Program Files`) | The original is left untouched. The verified new version is installed to `%LOCALAPPDATA%\Kestrel\app\Kestrel.exe` (which keeps updating itself from then on), with **Start new version** / **Open folder** buttons. No admin rights are requested. |
-| Release marked as required (`minimum_supported` newer than your version) | The prompt says "required" and **Later** only postpones it for this session. |
+| Release marked as required (`minimum_supported` newer than your version) | Kestrel 0.3.0 and newer: the prompt says "required", **Later** only closes the window, and **Play is blocked** (button shows *UPDATE REQUIRED*, Home shows an *Update now* banner) until the update is installed. The required minimum is saved in `launcher.json` (`update_required_minimum`), so it stays enforced offline; it clears itself once the launcher is new enough or a check finds no required release. Required updates are checked at every start, even with *Show new versions automatically* turned off. Kestrel 0.2.x and older only show the "required" prompt at every start; their Play button was never blocked. |
 
-Settings → **Updates**: installed version, update source, *Automatically check for
-updates when Kestrel starts*, **Check for updates**, and **Retry update** after a
+Settings → **Updates**: installed version, update source, *Show new versions
+automatically when Kestrel starts* (optional updates only; required ones are always
+checked), **Check for updates**, and **Retry update** after a
 failure. There is a single channel (`stable`), so there is no channel picker.
 
 ## Configuration of this project

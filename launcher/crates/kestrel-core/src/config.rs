@@ -87,6 +87,10 @@ pub struct LauncherConfig {
     pub update_auto_check: bool,
     /// Version the user answered "Later" for; not prompted again automatically.
     pub update_dismissed_version: String,
+    /// `minimum_supported` of the last signed release that required an update
+    /// from this launcher. Play stays blocked while the running version is
+    /// older, even offline; cleared once a check shows nothing is required.
+    pub update_required_minimum: String,
 }
 
 impl Default for LauncherConfig {
@@ -108,6 +112,7 @@ impl Default for LauncherConfig {
             download_threads: 8,
             update_auto_check: true,
             update_dismissed_version: String::new(),
+            update_required_minimum: String::new(),
         }
     }
 }

@@ -4,6 +4,10 @@ A Minecraft Java Edition **1.8.9** PvP client: a native Windows launcher (Rust) 
 Forge client mod (Java) with a configurable HUD, custom crosshair, toggle sprint, local
 capes, custom skies, kill effects and performance presets.
 
+Kestrel keeps your field of view fixed: sprinting, Speed/Slowness, flying, drawing a
+bow, dying, being under water and other mods' FOV events no longer zoom the camera.
+Your FOV slider in Video Settings works as usual (`client/.../rendering/StaticFov.java`).
+
 ```
 launcher/   Rust workspace: kestrel-core (install/verify/auth/launch/update), kestrel-launcher (egui GUI),
             kestrel-release (publisher signing tool, not shipped)

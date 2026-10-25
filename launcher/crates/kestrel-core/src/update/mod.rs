@@ -158,6 +158,40 @@ pub fn should_prompt(release: &Release, current: &Version, dismissed: &str, manu
         .unwrap_or(true)
 }
 
+/// The version this launcher must be updated to before Minecraft may start,
+/// if any. `live` is the newest signed release from this session's check
+/// (`None` if there was no successful check); `remembered` is the minimum
+/// saved from an earlier check, so going offline cannot bypass a required
+/// update. Unparsable remembered values are ignored.
+pub fn required_minimum(
+    current: &Version,
+    live: Option<&Release>,
+    remembered: &str,
+) -> Option<Version> {
+    if let Some(r) = live
+        && r.is_required_for(current)
+    {
+        return r.minimum_supported.clone();
+    }
+    manifest::parse_version(remembered)
+        .ok()
+        .filter(|m| current < m)
+}
+
+/// New value for the remembered minimum after a successful check:
+/// the release's minimum when it requires an update from `current`,
+/// otherwise empty (nothing is required any more).
+pub fn remembered_minimum_after_check(current: &Version, latest: Option<&Release>) -> String {
+    match latest {
+        Some(r) if r.is_required_for(current) => r
+            .minimum_supported
+            .as_ref()
+            .map(|m| m.to_string())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
 pub fn updates_dir(layout: &Layout) -> PathBuf {
     layout.root().join("updates")
 }
@@ -385,6 +419,47 @@ mod tests {
         // Never offered when already current; garbage dismissal values are ignored.
         assert!(!should_prompt(&r, &Version::new(0, 2, 0), "", true));
         assert!(should_prompt(&r, &cur, "not-a-version", false));
+    }
+
+    #[test]
+    fn required_update_blocks_older_versions_only() {
+        let k = test_key(3);
+        let t = MockTransport::default();
+        let mut r = publish(&t, "0.3.0", &exe_bytes(), &k);
+        r.minimum_supported = Some(Version::new(0, 3, 0));
+        let old = Version::new(0, 2, 2);
+        let new = Version::new(0, 3, 0);
+        let v = |s: &str| Version::parse(s).unwrap();
+
+        // Older launcher: blocked by the live release, and the minimum is remembered.
+        assert_eq!(required_minimum(&old, Some(&r), ""), Some(v("0.3.0")));
+        let remembered = remembered_minimum_after_check(&old, Some(&r));
+        assert_eq!(remembered, "0.3.0");
+        // ...still blocked offline (no live check) thanks to the remembered minimum.
+        assert_eq!(required_minimum(&old, None, &remembered), Some(v("0.3.0")));
+
+        // Updated launcher: not blocked, nothing remembered -> no update loop.
+        assert_eq!(required_minimum(&new, Some(&r), &remembered), None);
+        assert_eq!(remembered_minimum_after_check(&new, Some(&r)), "");
+        assert_eq!(required_minimum(&new, None, ""), None);
+
+        // Optional releases never block, and a check without a required release
+        // clears an old remembered minimum (e.g. a withdrawn release).
+        let mut optional = r.clone();
+        optional.minimum_supported = None;
+        assert_eq!(required_minimum(&old, Some(&optional), ""), None);
+        assert_eq!(remembered_minimum_after_check(&old, Some(&optional)), "");
+        assert_eq!(remembered_minimum_after_check(&old, None), "");
+        // A minimum older than or equal to the running version never blocks.
+        r.minimum_supported = Some(Version::new(0, 2, 0));
+        assert_eq!(required_minimum(&old, Some(&r), ""), None);
+        // Garbage in launcher.json cannot block (or crash) the launcher.
+        assert_eq!(required_minimum(&old, None, "not-a-version"), None);
+        // Pre-releases compare by semver rules.
+        assert_eq!(
+            required_minimum(&v("0.3.0-rc.1"), None, "0.3.0"),
+            Some(v("0.3.0"))
+        );
     }
 
     #[test]
