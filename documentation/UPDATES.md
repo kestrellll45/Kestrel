@@ -107,6 +107,28 @@ The client mod is embedded in `Kestrel.exe`, so a launcher update also delivers
 the matching client mod: on the next Play, the launcher replaces the old
 `kestrel-*.jar` in `instance\mods` (and only that file).
 
+## Automatic publishing (GitHub Actions)
+
+`.github/workflows/release.yml` runs the same `publish-release.ps1` on a GitHub-hosted
+Windows runner, so a release can be shipped without your PC.
+
+**One-time setup:** in the repository, *Settings → Secrets and variables → Actions → New
+repository secret*, name `KESTREL_UPDATE_SIGNING_KEY`, value = the single line inside
+`%APPDATA%\Kestrel-signing\update-signing-key.txt`. (`notepad` that file, copy, paste.
+Keep your local backup; the secret cannot be read back from GitHub.)
+
+**Shipping a version:** bump the version, write `notes\<version>.md`, commit, push to
+`main`. On every push to `main` the workflow checks whether `v<version>` is already
+released: if yes it does nothing; if not, it runs all tests, builds, signs and publishes.
+It can also be started by hand (*Actions → Release → Run workflow*). Every check listed
+above still applies; nothing is uploaded if any step fails, and the build log is attached
+to the failed run.
+
+Trust notes: the key is written to the runner's temp folder only for that job and deleted
+afterwards; GitHub masks it in logs. Only people who can push to `main` can trigger a
+release. As on your PC, the build (Gradle and Cargo dependencies) runs on the machine that
+holds the key. The workflow uses only GitHub's own actions, pinned to exact commits.
+
 ## How it works
 
 ```

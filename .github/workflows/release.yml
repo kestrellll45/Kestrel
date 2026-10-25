@@ -1,0 +1,101 @@
+# Builds, tests, signs and publishes a Kestrel release on GitHub's Windows runners.
+#
+# Runs on every push to main (and on demand). It publishes only when the version in
+# launcher/Cargo.toml has no GitHub release yet and notes/<version>.md exists, so a
+# normal push to main does nothing. All the real work and every safety check is
+# scripts/publish-release.ps1, the same script used locally (see UPDATES.md).
+#
+# Required secret: KESTREL_UPDATE_SIGNING_KEY = the contents of your private key file
+# %APPDATA%\Kestrel-signing\update-signing-key.txt (one line of base64).
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the release and upload its assets; nothing else
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # Third-party code is avoided in this job because it handles the signing key;
+      # the two official actions are pinned to exact commits.
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Decide whether to publish
+        id: decide
+        shell: powershell
+        run: |
+          . scripts\common.ps1
+          $version = Get-LauncherVersion
+          $mod = Get-ModVersion
+          if ($version -ne $mod) { throw "Version mismatch: launcher $version vs client mod $mod. Use scripts\bump-version.ps1." }
+          $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+          & gh release view "v$version" --repo $env:GITHUB_REPOSITORY *> $null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $prev
+          if ($exists) {
+            Write-Host "v$version is already released; nothing to publish."
+            "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            exit 0
+          }
+          if (-not (Test-Path "notes\$version.md")) { throw "notes\$version.md is missing; write the release notes for $version first." }
+          Write-Host "Publishing Kestrel $version."
+          "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Prepare branch, toolchains and signing key
+        if: steps.decide.outputs.publish == 'true'
+        shell: powershell
+        env:
+          SIGNING_KEY: ${{ secrets.KESTREL_UPDATE_SIGNING_KEY }}
+        run: |
+          if (-not $env:SIGNING_KEY) {
+            throw 'Secret KESTREL_UPDATE_SIGNING_KEY is not set (Settings -> Secrets and variables -> Actions). See documentation/UPDATES.md.'
+          }
+          # publish-release.ps1 releases only from branch main at origin/main.
+          git checkout -B main $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'git checkout failed' }
+          # Gradle runs on JDK 17 (it downloads Java 8 for the mod itself).
+          "JAVA_HOME=$env:JAVA_HOME_17_X64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add rustfmt clippy
+          # The key lives only in the runner's temp folder for this job.
+          $keyPath = Join-Path $env:RUNNER_TEMP 'update-signing-key.txt'
+          [System.IO.File]::WriteAllText($keyPath, $env:SIGNING_KEY.Trim())
+          "KESTREL_SIGNING_KEY=$keyPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build, test, sign and publish
+        if: steps.decide.outputs.publish == 'true'
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\publish-release.ps1 -Notes "notes\${{ steps.decide.outputs.version }}.md"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Remove signing key
+        if: always()
+        shell: powershell
+        run: Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'update-signing-key.txt')
+
+      - name: Upload build log
+        if: failure() && steps.decide.outputs.publish == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-log
+          path: dist/release-log.txt
+          if-no-files-found: ignore
