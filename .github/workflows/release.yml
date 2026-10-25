@@ -31,14 +31,14 @@ jobs:
       # Third-party code is avoided in this job because it handles the signing key;
       # the two official actions are pinned to exact commits.
       - name: Check out
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: true
 
       - name: Decide whether to publish
         id: decide
-        shell: powershell
+        shell: pwsh
         run: |
           . scripts\common.ps1
           $version = Get-LauncherVersion
@@ -48,6 +48,8 @@ jobs:
           & gh release view "v$version" --repo $env:GITHUB_REPOSITORY *> $null
           $exists = ($LASTEXITCODE -eq 0)
           $ErrorActionPreference = $prev
+          # "Release not found" left exit code 1 behind; GitHub would report it as the step result.
+          $global:LASTEXITCODE = 0
           if ($exists) {
             Write-Host "v$version is already released; nothing to publish."
             "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -60,7 +62,7 @@ jobs:
 
       - name: Prepare branch, toolchains and signing key
         if: steps.decide.outputs.publish == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           SIGNING_KEY: ${{ secrets.KESTREL_UPDATE_SIGNING_KEY }}
         run: |
@@ -79,22 +81,23 @@ jobs:
           $keyPath = Join-Path $env:RUNNER_TEMP 'update-signing-key.txt'
           [System.IO.File]::WriteAllText($keyPath, $env:SIGNING_KEY.Trim())
           "KESTREL_SIGNING_KEY=$keyPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "toolchain setup failed (exit $LASTEXITCODE)" }
 
       - name: Build, test, sign and publish
         if: steps.decide.outputs.publish == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
-          powershell -ExecutionPolicy Bypass -File scripts\publish-release.ps1 -Notes "notes\${{ steps.decide.outputs.version }}.md"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # PowerShell 7: native tools' stderr (git, cargo, gradle progress) is not turned into errors.
+          & .\scripts\publish-release.ps1 -Notes "notes\${{ steps.decide.outputs.version }}.md"
 
       - name: Remove signing key
         if: always()
-        shell: powershell
+        shell: pwsh
         run: Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'update-signing-key.txt')
 
       - name: Upload build log
         if: failure() && steps.decide.outputs.publish == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-log
           path: dist/release-log.txt
