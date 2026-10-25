@@ -56,6 +56,10 @@ public final class CosmeticsRequest {
                 c.killEffects.color = (int) col.getAsLong();
             }
         }
+        JsonObject qol = obj(o, "qol");
+        if (qol != null) {
+            c.qol.fullbright = bool(qol, "fullbright", c.qol.fullbright);
+        }
         c.lastLauncherCosmeticsRevision = revision;
         c.validate();
         return true;

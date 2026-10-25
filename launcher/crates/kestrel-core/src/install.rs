@@ -185,7 +185,7 @@ pub fn materialize_embedded(layout: &Layout, e: &EmbeddedMod) -> Result<PathBuf>
     Ok(dest)
 }
 
-fn is_kestrel_jar(p: &Path) -> bool {
+pub(crate) fn is_kestrel_jar(p: &Path) -> bool {
     p.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.starts_with("kestrel-") && n.ends_with(".jar"))

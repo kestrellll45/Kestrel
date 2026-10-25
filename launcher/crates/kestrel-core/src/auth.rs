@@ -4,10 +4,11 @@
 //! launcher never sees their password) → Xbox Live user token → XSTS token →
 //! Minecraft services token → Minecraft profile.
 //!
-//! Requires an Azure app registration (public client, "Personal Microsoft
-//! accounts", device code flow enabled). New app IDs must additionally be
-//! approved by Mojang before `login_with_xbox` accepts them; until then step 4
-//! fails with HTTP 403 and we report that explicitly.
+//! Requires a Microsoft Entra app registration ("Personal Microsoft accounts
+//! only", "Allow public client flows" enabled). The authority is therefore
+//! `/consumers`. New app IDs must additionally be approved by Mojang before
+//! `login_with_xbox` accepts them; until then step 3 fails with HTTP 403 and we
+//! report that explicitly.
 
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -20,13 +21,99 @@ use crate::paths::atomic_write;
 use crate::progress::Progress;
 use crate::{redact, secure};
 
-const DEVICE_CODE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
-const TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+/// Personal-Microsoft-account-only authority (the app registration must use
+/// "Personal Microsoft accounts only"; `/common` would also admit work/school
+/// accounts, which cannot own Minecraft).
+pub const DEVICE_CODE_URL: &str =
+    "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
+pub const TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 const XBL_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
 const XSTS_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
 const MC_LOGIN_URL: &str = "https://api.minecraftservices.com/authentication/login_with_xbox";
 const MC_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
-const SCOPE: &str = "XboxLive.signin offline_access";
+pub const SCOPE: &str = "XboxLive.signin offline_access";
+
+/// Microsoft first-party application IDs that show up in Entra/Azure portal
+/// error pages (e.g. AADSTS50020). They are never a launcher's client ID; users
+/// sometimes copy them from the error into Settings.
+const MICROSOFT_PORTAL_APP_IDS: &[(&str, &str)] = &[(
+    "74658136-14ec-4630-ad9b-26e160ff0fc6",
+    "the Azure portal (ADIbizaUX)",
+)];
+
+/// Hosts Microsoft uses for the device-code sign-in page. Anything else in a
+/// device-code response is refused instead of being opened in the browser.
+const VERIFICATION_HOSTS: &[&str] = &[
+    "microsoft.com",
+    "www.microsoft.com",
+    "login.microsoftonline.com",
+    "login.live.com",
+];
+
+/// Normalise and check the configured Application (client) ID.
+pub fn validate_client_id(raw: &str) -> Result<String> {
+    let id = raw.trim();
+    if id.is_empty() {
+        return Err(Error::Auth(
+            "no Microsoft application (client) ID configured. Register an app in Microsoft Entra and paste its Application (client) ID into Settings > Advanced (see documentation/BUILD.md, \"Microsoft sign-in\").".into(),
+        ));
+    }
+    let lower = id.to_ascii_lowercase();
+    if !is_guid(&lower) || lower == "00000000-0000-0000-0000-000000000000" {
+        return Err(Error::Auth(format!(
+            "\"{id}\" is not an Application (client) ID. It must be a GUID like 1a2b3c4d-1234-5678-9abc-def012345678, copied from your app registration's Overview page in Microsoft Entra."
+        )));
+    }
+    if let Some((_, what)) = MICROSOFT_PORTAL_APP_IDS
+        .iter()
+        .find(|(known, _)| *known == lower)
+    {
+        return Err(Error::Auth(format!(
+            "{id} is the application ID of {what}, shown in Microsoft error pages. It is not your Kestrel app registration. Use the Application (client) ID from your own app registration's Overview page."
+        )));
+    }
+    Ok(lower)
+}
+
+fn is_guid(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 36
+        && b.iter().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => *c == b'-',
+            _ => c.is_ascii_hexdigit(),
+        })
+}
+
+/// The exact device-code request Kestrel sends: endpoint and form fields.
+pub fn device_code_request(client_id: &str) -> (&'static str, [(&'static str, String); 2]) {
+    (
+        DEVICE_CODE_URL,
+        [
+            ("client_id", client_id.to_string()),
+            ("scope", SCOPE.to_string()),
+        ],
+    )
+}
+
+/// Only an `https://` URL on a Microsoft sign-in host may be shown/opened.
+pub fn validate_verification_uri(uri: &str) -> Result<String> {
+    let bad = || {
+        Error::Auth(format!(
+            "Microsoft returned an unexpected sign-in page address ({uri}); refusing to open it"
+        ))
+    };
+    let rest = uri.strip_prefix("https://").ok_or_else(bad)?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') || authority.contains(':') {
+        return Err(bad());
+    }
+    let host = authority.to_ascii_lowercase();
+    if VERIFICATION_HOSTS.contains(&host.as_str()) {
+        Ok(uri.to_string())
+    } else {
+        Err(bad())
+    }
+}
 
 /// A ready-to-launch identity.
 #[derive(Debug, Clone)]
@@ -91,16 +178,13 @@ struct TokenResponse {
 pub struct Authenticator {
     agent: ureq::Agent,
     client_id: String,
+    device_code_url: String,
+    token_url: String,
 }
 
 impl Authenticator {
     pub fn new(client_id: &str) -> Result<Authenticator> {
-        let client_id = client_id.trim();
-        if client_id.is_empty() {
-            return Err(Error::Auth(
-                "no Microsoft application (client) ID configured — see documentation/BUILD.md, \"Microsoft sign-in\"".into(),
-            ));
-        }
+        let client_id = validate_client_id(client_id)?;
         // OAuth errors come back as 4xx with a JSON body we need to read.
         let agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
@@ -110,28 +194,43 @@ impl Authenticator {
             .into();
         Ok(Authenticator {
             agent,
-            client_id: client_id.to_string(),
+            client_id,
+            device_code_url: DEVICE_CODE_URL.to_string(),
+            token_url: TOKEN_URL.to_string(),
         })
     }
 
+    /// Test-only: point the OAuth requests at a local mock server.
+    #[cfg(test)]
+    fn with_oauth_endpoints(mut self, device_code_url: &str, token_url: &str) -> Self {
+        self.device_code_url = device_code_url.to_string();
+        self.token_url = token_url.to_string();
+        self
+    }
+
     pub fn start_device_code(&self) -> Result<DeviceCode> {
+        let (_, form) = device_code_request(&self.client_id);
+        let url = self.device_code_url.as_str();
         let mut resp = self
             .agent
-            .post(DEVICE_CODE_URL)
-            .send_form([("client_id", self.client_id.as_str()), ("scope", SCOPE)])
-            .map_err(|e| http_err(DEVICE_CODE_URL, e))?;
+            .post(url)
+            .send_form(form.iter().map(|(k, v)| (*k, v.as_str())))
+            .map_err(|e| http_err(url, e))?;
         let status = resp.status().as_u16();
         let body = resp
             .body_mut()
             .read_to_string()
-            .map_err(|e| http_err(DEVICE_CODE_URL, e))?;
+            .map_err(|e| http_err(url, e))?;
         if status != 200 {
             return Err(Error::Auth(format!(
                 "device code request failed (HTTP {status}): {}",
                 oauth_message(&body)
             )));
         }
-        serde_json::from_str(&body).map_err(|e| Error::json("device code response", e))
+        let mut code: DeviceCode =
+            serde_json::from_str(&body).map_err(|e| Error::json("device code response", e))?;
+        code.verification_uri = validate_verification_uri(&code.verification_uri)?;
+        Ok(code)
     }
 
     /// Poll until the user completes sign-in, the code expires, or `progress`
@@ -194,15 +293,16 @@ impl Authenticator {
     }
 
     fn token_request(&self, form: &[(&str, &str)]) -> Result<TokenResponse> {
+        let url = self.token_url.as_str();
         let mut resp = self
             .agent
-            .post(TOKEN_URL)
+            .post(url)
             .send_form(form.iter().copied())
-            .map_err(|e| http_err(TOKEN_URL, e))?;
+            .map_err(|e| http_err(url, e))?;
         let body = resp
             .body_mut()
             .read_to_string()
-            .map_err(|e| http_err(TOKEN_URL, e))?;
+            .map_err(|e| http_err(url, e))?;
         serde_json::from_str(&body).map_err(|e| Error::json("token response", e))
     }
 
@@ -425,6 +525,169 @@ mod tests {
     #[test]
     fn requires_client_id() {
         assert!(Authenticator::new("  ").is_err());
+    }
+
+    const APP: &str = "1a2b3c4d-1234-5678-9abc-def012345678";
+
+    #[test]
+    fn client_id_must_be_an_app_guid() {
+        assert_eq!(
+            validate_client_id(&format!("  {}  ", APP.to_uppercase())).unwrap(),
+            APP
+        );
+        for bad in [
+            "",
+            "kestrel",
+            "1a2b3c4d12345678 9abcdef012345678",
+            "{1a2b3c4d-1234-5678-9abc-def012345678}",
+            "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
+            "00000000-0000-0000-0000-000000000000",
+        ] {
+            assert!(validate_client_id(bad).is_err(), "{bad:?} accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_azure_portal_app_id_from_aadsts_errors() {
+        let e = validate_client_id("74658136-14EC-4630-AD9B-26E160FF0FC6").unwrap_err();
+        assert!(e.to_string().contains("Azure portal"), "{e}");
+        assert!(Authenticator::new("74658136-14ec-4630-ad9b-26e160ff0fc6").is_err());
+    }
+
+    #[test]
+    fn device_code_request_uses_consumers_authority_and_configured_client_id() {
+        let (url, form) = device_code_request(APP);
+        assert_eq!(
+            url,
+            "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode"
+        );
+        assert_eq!(
+            TOKEN_URL,
+            "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+        );
+        assert_eq!(form[0], ("client_id", APP.to_string()));
+        assert_eq!(
+            form[1],
+            ("scope", "XboxLive.signin offline_access".to_string())
+        );
+        for u in [DEVICE_CODE_URL, TOKEN_URL] {
+            assert!(
+                !u.contains("/common/") && !u.contains("/organizations/"),
+                "{u}"
+            );
+            assert!(!u.contains("portal.azure.com") && !u.contains("entra.microsoft.com"));
+        }
+    }
+
+    #[test]
+    fn verification_uri_must_be_a_microsoft_sign_in_page() {
+        for ok in [
+            "https://www.microsoft.com/link",
+            "https://microsoft.com/devicelogin",
+            "https://login.microsoftonline.com/common/oauth2/deviceauth",
+            "https://login.live.com/oauth20_remoteconnect.srf",
+        ] {
+            assert_eq!(validate_verification_uri(ok).unwrap(), ok);
+        }
+        for bad in [
+            "http://www.microsoft.com/link",
+            "https://portal.azure.com/",
+            "https://entra.microsoft.com/#home",
+            "https://microsoft.com.evil.example/link",
+            "https://evil.example/?next=https://www.microsoft.com/link",
+            "https://www.microsoft.com@evil.example/link",
+            "https://www.microsoft.com:8443/link",
+            "javascript:alert(1)",
+            "",
+        ] {
+            assert!(validate_verification_uri(bad).is_err(), "{bad:?} accepted");
+        }
+    }
+
+    /// Serve one canned HTTP response and hand back the raw request.
+    fn one_shot_server(response_body: &'static str) -> (String, std::thread::JoinHandle<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut req = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = s.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                req.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&req);
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let len = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            k.eq_ignore_ascii_case("content-length")
+                                .then(|| v.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    if req.len() >= end + 4 + len {
+                        break;
+                    }
+                }
+            }
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            s.write_all(reply.as_bytes()).unwrap();
+            String::from_utf8(req).unwrap()
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    #[test]
+    fn sends_the_configured_client_id_and_returns_the_verification_url() {
+        let (base, server) = one_shot_server(
+            r#"{"user_code":"ABCD-EFGH","device_code":"dc","verification_uri":"https://www.microsoft.com/link","expires_in":900,"interval":5,"message":"To sign in, use a web browser to open the page https://www.microsoft.com/link and enter the code ABCD-EFGH to authenticate."}"#,
+        );
+        let auth = Authenticator::new(&format!(" {APP} "))
+            .unwrap()
+            .with_oauth_endpoints(
+                &format!("{base}/consumers/oauth2/v2.0/devicecode"),
+                &format!("{base}/consumers/oauth2/v2.0/token"),
+            );
+        let code = auth.start_device_code().unwrap();
+        let req = server.join().unwrap();
+        let (head, body) = req.split_once("\r\n\r\n").unwrap();
+        assert!(
+            head.starts_with("POST /consumers/oauth2/v2.0/devicecode HTTP/1.1"),
+            "{head}"
+        );
+        assert!(
+            head.to_ascii_lowercase()
+                .contains("content-type: application/x-www-form-urlencoded"),
+            "{head}"
+        );
+        assert_eq!(
+            body,
+            format!("client_id={APP}&scope=XboxLive.signin+offline_access")
+        );
+        assert_eq!(code.verification_uri, "https://www.microsoft.com/link");
+        assert_eq!(code.user_code, "ABCD-EFGH");
+    }
+
+    #[test]
+    fn refuses_a_device_code_response_pointing_at_the_azure_portal() {
+        let (base, server) = one_shot_server(
+            r#"{"user_code":"ABCD-EFGH","device_code":"dc","verification_uri":"https://portal.azure.com/","expires_in":900,"interval":5}"#,
+        );
+        let auth = Authenticator::new(APP)
+            .unwrap()
+            .with_oauth_endpoints(&format!("{base}/devicecode"), &format!("{base}/token"));
+        let err = auth.start_device_code().unwrap_err();
+        server.join().unwrap();
+        assert!(err.to_string().contains("refusing to open"), "{err}");
     }
 
     #[test]

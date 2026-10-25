@@ -4,6 +4,7 @@ import com.kestrel.config.ClientConfig;
 import com.kestrel.config.ConfigManager;
 import com.kestrel.config.Preset;
 import com.kestrel.config.PresetApplier;
+import com.kestrel.rendering.Fullbright;
 import com.kestrel.cosmetics.CapeManager;
 import com.kestrel.cosmetics.CapeRenderer;
 import com.kestrel.effects.KillDetector;
@@ -89,6 +90,7 @@ public final class KestrelClient {
         launcherSync.applyNow();
         cfg.validate();
         configManager.markDirty();
+        applyQol(cfg);
 
         input.registerKeybinds();
         Object[] listeners = {this, performance, input, toggleSprint, hud, crosshair, capes, sky, killEffects, killDetector, launcherSync};
@@ -123,10 +125,20 @@ public final class KestrelClient {
 
     /** Re-apply anything derived from config and schedule a save. */
     public void onConfigChanged() {
+        applyQol(config());
         sky.apply();
         capes.ensureLoaded();
         hud.invalidate();
         configManager.markDirty();
+    }
+
+    /** Push QoL settings into the render hooks (cheap; safe to call often). */
+    private void applyQol(ClientConfig cfg) {
+        boolean on = cfg.qol.fullbright;
+        if (Fullbright.isEnabled() != on) {
+            Fullbright.setEnabled(on);
+            KestrelMod.LOG.info("[Kestrel] fullbright {}", on ? "on" : "off");
+        }
     }
 
     public void openSettings() {

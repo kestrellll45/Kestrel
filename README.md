@@ -26,6 +26,13 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Run   # builds mod +
 powershell -ExecutionPolicy Bypass -File scripts\release.ps1   # -> release\Kestrel.exe
 ```
 
+## QoL tab
+
+Manage external Forge 1.8.9 mods (install, enable/disable, remove with recovery),
+resource packs (enable, disable, reorder, preview; saved to `options.txt` like
+Minecraft's own menu) and toggle **Fullbright**, all from the launcher. See
+[documentation/QOL.md](documentation/QOL.md).
+
 ## Automatic updates
 
 `Kestrel.exe` checks [GitHub Releases](https://github.com/kestrellll45/Kestrel/releases)

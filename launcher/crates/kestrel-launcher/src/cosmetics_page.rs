@@ -763,6 +763,7 @@ fn item_card(
     content: impl FnOnce(&mut egui::Ui, Vec2),
 ) -> CardResponse {
     let mut remove = false;
+    let mut remove_rect: Option<egui::Rect> = None;
     let inner = egui::Frame::NONE
         .fill(if equipped {
             ACCENT.gamma_multiply(0.22)
@@ -800,7 +801,9 @@ fn item_card(
                     }
                     if removable {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("Remove").clicked() {
+                            let b = ui.small_button("Remove");
+                            remove_rect = Some(b.rect);
+                            if b.clicked() {
                                 remove = true;
                             }
                         });
@@ -809,6 +812,14 @@ fn item_card(
             });
         });
     let resp = inner.response.interact(Sense::click());
+    // The card-wide click sense is registered after the button and wins the
+    // hit test, so route a click on the button's area to Remove.
+    if resp.clicked()
+        && let (Some(r), Some(p)) = (remove_rect, resp.interact_pointer_pos())
+        && r.contains(p)
+    {
+        remove = true;
+    }
     CardResponse {
         clicked: resp.clicked() && !remove,
         remove,

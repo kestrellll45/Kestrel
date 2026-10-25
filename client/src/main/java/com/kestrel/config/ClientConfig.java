@@ -29,6 +29,7 @@ public final class ClientConfig {
     public Sky sky = new Sky();
     public KillEffects killEffects = new KillEffects();
     public Performance performance = new Performance();
+    public Qol qol = new Qol();
 
     public static final class HudElementConfig {
         public boolean enabled = false;
@@ -161,6 +162,12 @@ public final class ClientConfig {
         }
     }
 
+    /** Quality-of-life features toggled from the launcher's QoL page. */
+    public static final class Qol {
+        /** Full lightmap brightness (see {@link com.kestrel.rendering.Fullbright}). */
+        public boolean fullbright = false;
+    }
+
     /** Clamp every value into a safe range and repair nulls. */
     public void validate() {
         if (hud == null) {
@@ -178,6 +185,7 @@ public final class ClientConfig {
         if (sky == null) sky = new Sky();
         if (killEffects == null) killEffects = new KillEffects();
         if (performance == null) performance = new Performance();
+        if (qol == null) qol = new Qol();
         if (Preset.byId(activePreset) == null) activePreset = Preset.COMPETITIVE.id;
         if (lastLauncherPreset == null) lastLauncherPreset = "";
         crosshair.validate();

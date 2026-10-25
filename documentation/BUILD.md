@@ -79,17 +79,43 @@ Kestrel uses Microsoft's OAuth device-code flow: you sign in on microsoft.com in
 browser and enter a short code. Kestrel never sees your password. Tokens are stored
 encrypted with Windows DPAPI (bound to your Windows account) in `accounts.dat`.
 
-Every third-party launcher needs its own Azure application ID:
+Every third-party launcher needs its own app registration in **Microsoft Entra ID**.
+Kestrel signs in with the device-code flow against the personal-account authority
+`https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode` and opens the
+sign-in page Microsoft returns (normally `https://www.microsoft.com/link`).
 
-1. Sign in at <https://portal.azure.com> → **Microsoft Entra ID** → **App registrations** →
-   **New registration**.
+**0. You need your own Entra directory (tenant).** A personal Microsoft account
+(outlook.com, hotmail.com, live.com, gmail-based MSA) that is not a member of any
+directory cannot use the Azure portal or Entra admin center: sign-in fails with
+
+> AADSTS50020: User account ... from identity provider 'live.com' does not exist in
+> tenant 'Microsoft Services' and cannot access the application
+> '74658136-14ec-4630-ad9b-26e160ff0fc6'(ADIbizaUX) in that tenant.
+
+That error comes from the **Azure portal** (`ADIbizaUX` is the portal's own app),
+not from Kestrel. Fix it once by creating a directory: in an InPrivate window open
+<https://azure.microsoft.com/free>, sign in with your personal account and complete
+the free sign-up. It creates a *Default Directory* in which you are Global
+Administrator. (Alternatively, ask an admin of an existing tenant to invite you.)
+
+1. Open <https://entra.microsoft.com>. If you belong to several directories, switch to
+   yours (gear icon → **Directories + subscriptions**). Go to **Entra ID** →
+   **App registrations** → **New registration**.
 2. Name: anything (e.g. "Kestrel Launcher"). Supported account types:
-   **Personal Microsoft accounts only**. No redirect URI is needed.
-3. Open the new app → **Authentication** → enable **Allow public client flows** → Save.
-4. Copy the **Application (client) ID** into Kestrel → Settings → Advanced.
+   **Personal Microsoft accounts only** (this matches Kestrel's `/consumers`
+   authority). No redirect URI.
+3. Open the new app → **Authentication** → **Advanced settings** → set
+   **Allow public client flows** to **Yes** → **Save**. No client secret or certificate.
+4. On the app's **Overview** page copy **Application (client) ID** (a GUID) into
+   Kestrel → Settings → Advanced. Do *not* use the Object ID, the Directory (tenant)
+   ID, or any ID shown in a Microsoft error page; Kestrel rejects non-GUIDs and the
+   Azure portal's ID with an explanation.
 5. **Mojang approval:** new app IDs must be approved before Minecraft's services accept
    them. Submit the app ID at <https://aka.ms/mce-reviewappid>. Until approved, sign-in
    fails at the last step with "Minecraft services rejected this application ID (HTTP 403)".
+
+Then Account → **Sign in with Microsoft** shows a code and a button that opens
+Microsoft's sign-in page; sign in there with the Microsoft account that owns Minecraft.
 
 ## What has and has not been verified
 

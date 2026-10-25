@@ -50,4 +50,23 @@ public class CosmeticsRequestTest {
         assertFalse(CosmeticsRequest.apply(c, "[1,2]"));
         assertFalse(CosmeticsRequest.apply(c, "{\"revision\":3}"));
     }
+
+    @Test
+    public void appliesFullbrightFromLauncher() {
+        ClientConfig c = new ClientConfig();
+        c.validate();
+        assertFalse(c.qol.fullbright);
+        assertTrue(CosmeticsRequest.apply(c, "{\"revision\": 5, \"qol\": {\"fullbright\": true}}"));
+        assertTrue(c.qol.fullbright);
+        assertTrue(CosmeticsRequest.apply(c, "{\"revision\": 6, \"qol\": {\"fullbright\": false}}"));
+        assertFalse(c.qol.fullbright);
+        // Older launchers omit "qol"; a wrong type is ignored. Both keep the current value.
+        c.qol.fullbright = true;
+        assertTrue(CosmeticsRequest.apply(c, "{\"revision\": 7}"));
+        assertTrue(c.qol.fullbright);
+        assertTrue(CosmeticsRequest.apply(c, "{\"revision\": 8, \"qol\": {\"fullbright\": \"yes\"}}"));
+        assertTrue(c.qol.fullbright);
+        assertTrue(CosmeticsRequest.apply(c, "{\"revision\": 9, \"qol\": null}"));
+        assertTrue(c.qol.fullbright);
+    }
 }

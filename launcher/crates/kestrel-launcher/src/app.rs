@@ -13,6 +13,7 @@ use kestrel_core::{FORGE_VERSION, LAUNCHER_VERSION, MC_VERSION, runtime, sysmem}
 
 use crate::cosmetics_page::CosmeticsPage;
 use crate::logger::LogBuffer;
+use crate::qol_page::QolPage;
 use crate::updater::Updater;
 use crate::worker::{self, Msg, PlayRequest};
 
@@ -30,6 +31,7 @@ const MAX_GAME_LINES: usize = 5000;
 enum Page {
     Home,
     Cosmetics,
+    Qol,
     Account,
     Settings,
     Performance,
@@ -76,6 +78,7 @@ pub struct LauncherApp {
     total_ram: Option<u64>,
     bundled_mod: Option<PathBuf>,
     cosmetics: CosmeticsPage,
+    qol: QolPage,
     updater: Updater,
 }
 
@@ -127,6 +130,7 @@ impl LauncherApp {
             java_probe: None,
             total_ram: sysmem::total_mib(),
             bundled_mod,
+            qol: QolPage::new(layout_for_cosmetics.clone()),
             cosmetics: CosmeticsPage::new(layout_for_cosmetics),
             updater,
         }
@@ -439,13 +443,14 @@ impl LauncherApp {
                             .color(MUTED),
                     );
                     ui.add_space(6.0);
-                    let can = self.busy == Busy::Idle && !self.cfg.msa_client_id.is_empty();
+                    let client_id = auth::validate_client_id(&self.cfg.msa_client_id);
+                    let can = self.busy == Busy::Idle && client_id.is_ok();
                     if ui
                         .add_enabled(can, egui::Button::new("Sign in with Microsoft"))
                         .clicked()
                     {
                         let (id, path, ctx) = (
-                            self.cfg.msa_client_id.clone(),
+                            client_id.as_ref().cloned().unwrap_or_default(),
                             self.layout.accounts(),
                             ui.ctx().clone(),
                         );
@@ -453,8 +458,8 @@ impl LauncherApp {
                             worker::sign_in(id, path, p, tx, ctx)
                         });
                     }
-                    if self.cfg.msa_client_id.is_empty() {
-                        ui.label(RichText::new("Set your Azure application (client) ID in Settings first — see BUILD.md.").color(WARN));
+                    if let Err(e) = &client_id {
+                        ui.label(RichText::new(format!("{e}")).color(WARN));
                     }
                 }
             }
@@ -645,10 +650,25 @@ impl LauncherApp {
                 dirty |= ui
                     .add(
                         egui::TextEdit::singleline(&mut self.cfg.msa_client_id)
+                            .hint_text("00000000-0000-0000-0000-000000000000")
                             .desired_width(300.0),
                     )
                     .changed();
             });
+            if !self.cfg.msa_client_id.trim().is_empty() {
+                match auth::validate_client_id(&self.cfg.msa_client_id) {
+                    Ok(_) => {
+                        ui.label(
+                            RichText::new("Signs in with personal Microsoft accounts (login.microsoftonline.com/consumers).")
+                                .small()
+                                .color(MUTED),
+                        );
+                    }
+                    Err(e) => {
+                        ui.label(RichText::new(format!("{e}")).small().color(WARN));
+                    }
+                }
+            }
             ui.horizontal(|ui| {
                 ui.label("Download threads");
                 dirty |= ui
@@ -817,6 +837,7 @@ impl eframe::App for LauncherApp {
                 for (p, name) in [
                     (Page::Home, "Home"),
                     (Page::Cosmetics, "Cosmetics"),
+                    (Page::Qol, "QoL"),
                     (Page::Account, "Account"),
                     (Page::Settings, "Settings"),
                     (Page::Performance, "Performance"),
@@ -843,6 +864,9 @@ impl eframe::App for LauncherApp {
                         }
                         if p == Page::Cosmetics {
                             self.cosmetics.refresh();
+                        }
+                        if p == Page::Qol {
+                            self.qol.refresh();
                         }
                         self.page = p;
                     }
@@ -890,6 +914,11 @@ impl eframe::App for LauncherApp {
                         Page::Settings => self.settings(ui),
                         Page::Performance => self.performance(ui),
                         Page::Cosmetics => self.cosmetics.ui(ui, self.busy == Busy::Running),
+                        Page::Qol => self.qol.ui(
+                            ui,
+                            self.busy != Busy::Idle && self.busy != Busy::SigningIn,
+                            self.busy == Busy::Running,
+                        ),
                         Page::About => self.about(ui),
                         Page::Logs => {}
                     });

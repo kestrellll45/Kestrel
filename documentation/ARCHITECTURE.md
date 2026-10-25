@@ -10,19 +10,23 @@ Kestrel.exe (Rust, egui)                      Minecraft 1.8.9 (Java 8, separate 
    ├─ download   verified parallel downloads     ├─ hud         modules, crosshair, editor
    ├─ install    end-to-end install + state      ├─ input       keybinds, CPS, toggle sprint
    ├─ launch     command line + process I/O      ├─ cosmetics   capes
-   ├─ auth       Microsoft device-code flow      ├─ rendering   custom skies
+   ├─ auth       Microsoft device-code flow      ├─ rendering   custom skies, fullbright
    ├─ secure     DPAPI token storage             ├─ effects     kill detection + effects
-   └─ config     launcher.json                   ├─ performance frame stats, video presets
-                                                 └─ gui         settings screen, widgets
+   ├─ config     launcher.json                   ├─ performance frame stats, video presets
+   ├─ mods       QoL mod manager                 ├─ mixin       EntityRenderer (fullbright)
+   └─ resourcepacks  packs + options.txt         └─ gui         settings screen, widgets
 ```
 
-The launcher and the mod share exactly two things:
+The launcher and the mod share exactly three things:
 
 1. The game directory layout (`<root>/instance` is `--gameDir`; the mod keeps its data in
-   `<root>/instance/kestrel`).
+   `<root>/instance/kestrel`). The QoL page manages `instance/mods` and the resource-pack
+   lines of `instance/options.txt` only while the game is not running (see QOL.md).
 2. JVM properties: `-Dkestrel.requestedPreset=<potato|competitive|visual>` (applied by the
    mod once per distinct request) and the log marker `[Kestrel] Client initialized`, which
    the launcher watches for to confirm the mod loaded.
+3. The launcher request file `instance/kestrel/launcher-cosmetics.json` (cosmetics and
+   Fullbright; see "Cosmetics page" below).
 
 ## Launcher
 
@@ -165,3 +169,29 @@ Verified in the development environment (Linux, no access to Mojang/Forge/Gradle
 - Real downloads from Mojang/Forge, the Java runtime install, Microsoft sign-in.
 - Visual correctness of cape placement, skies and effects in game; FPS impact.
 - The PowerShell scripts (written for Windows PowerShell 5.1; not executed yet).
+
+## QoL page (mods, resource packs, Fullbright)
+
+See [QOL.md](QOL.md) for behaviour and file formats.
+
+* `kestrel-core/src/mods.rs`: scan (`mcmod.info`/manifest, size-limited), compatibility
+  verdict, install (temp copy + size check + no-clobber move), enable/disable
+  (`<root>/mods-disabled`), remove/restore (`<root>/mods-trash`). The built-in
+  `kestrel-*.jar` is protected and the name pattern reserved, because
+  `install::install_mod` deletes other `kestrel-*.jar` files. Moves use hard link +
+  unlink so an existing file is never replaced.
+* `kestrel-core/src/resourcepacks.rs`: pack detection (`pack.mcmeta` at the top level, as
+  Minecraft requires), icons (size-limited PNG decode), and `options.txt`
+  `resourcePacks`/`incompatibleResourcePacks` read/write with Minecraft 1.8.9's order
+  (lowest priority first) and incompatible-pack rule, verified with `javap` against the
+  1.8.9 client (`GuiScreenResourcePacks.actionPerformed` reverses the on-screen list;
+  `FallbackResourceManager.getResource` searches from the last pack; the
+  `ResourcePackRepository` constructor drops non-format-1 packs that are not in
+  `incompatibleResourcePacks`). Other lines are copied byte for byte.
+* Fullbright: `cosmetics::CosmeticSettings::qol` in the request, `ClientConfig.qol` in the
+  mod, `CosmeticsRequest` applies it, and `MixinEntityRenderer` redirects the single
+  `gammaSetting` read in `EntityRenderer.updateLightmap` through
+  `Fullbright.lightmapGamma` (no settings are written).
+* `kestrel-launcher/src/qol_page.rs`: the UI; scans, installs and moves run on worker
+  threads, icons decode off the UI thread.
+

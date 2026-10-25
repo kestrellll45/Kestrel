@@ -76,4 +76,23 @@ public class ConfigManagerTest {
         m.shutdown();
         m2.shutdown();
     }
+
+    @Test
+    public void fullbrightIsPersistedAndDefaultsOff() throws Exception {
+        File f = tmp.newFile("config.json");
+        write(f, "{\"crosshair\":{\"custom\":true}}"); // older file without "qol"
+        ClientConfig c = ConfigManager.readOrDefault(f, new Gson());
+        assertFalse(c.qol.fullbright);
+
+        write(f, "{\"qol\":{\"fullbright\":true}}");
+        assertTrue(ConfigManager.readOrDefault(f, new Gson()).qol.fullbright);
+
+        write(f, "{\"qol\":null}");
+        c = ConfigManager.readOrDefault(f, new Gson());
+        assertFalse(c.qol.fullbright);
+
+        write(f, "{\"qol\":{\"fullbright\":\"maybe\"}}"); // Gson reads a string as Boolean.parseBoolean: never true here
+        c = ConfigManager.readOrDefault(f, new Gson());
+        assertFalse(c.qol.fullbright);
+    }
 }

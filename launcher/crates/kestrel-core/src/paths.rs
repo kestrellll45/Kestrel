@@ -87,6 +87,19 @@ impl Layout {
     pub fn cache(&self) -> PathBuf {
         self.root.join("cache")
     }
+    /// `options.txt` in the game directory (vanilla settings, resource packs).
+    pub fn options_txt(&self) -> PathBuf {
+        self.instance().join("options.txt")
+    }
+    /// Mods disabled in the QoL Mod Manager. Outside the game directory, so
+    /// Forge never sees them.
+    pub fn disabled_mods(&self) -> PathBuf {
+        self.root.join("mods-disabled")
+    }
+    /// Mods removed in the QoL Mod Manager (recoverable until deleted by hand).
+    pub fn mod_trash(&self) -> PathBuf {
+        self.root.join("mods-trash")
+    }
 
     /// Create every directory the launcher writes into.
     pub fn ensure(&self) -> Result<()> {

@@ -6,6 +6,7 @@ mod cosmetics_page;
 mod embedded;
 mod graphics;
 mod logger;
+mod qol_page;
 mod selfcheck;
 mod updater;
 mod worker;

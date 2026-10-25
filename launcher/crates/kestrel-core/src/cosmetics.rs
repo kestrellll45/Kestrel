@@ -125,12 +125,24 @@ pub struct KillEffectSettings {
     pub color: u32,
 }
 
+/// QoL settings carried by the same launcher request (QoL page).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QolSettings {
+    /// Full lightmap brightness in game (`ClientConfig.Qol.fullbright`).
+    #[serde(default)]
+    pub fullbright: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CosmeticSettings {
     pub cosmetics: CapeSettings,
     pub sky: SkySettings,
     #[serde(rename = "killEffects")]
     pub kill_effects: KillEffectSettings,
+    /// Older request files have no `qol` section.
+    #[serde(default)]
+    pub qol: QolSettings,
 }
 
 impl Default for CosmeticSettings {
@@ -154,6 +166,7 @@ impl Default for CosmeticSettings {
                 sounds: true,
                 color: 0xFFE8_833A,
             },
+            qol: QolSettings::default(),
         }
     }
 }
@@ -276,6 +289,7 @@ fn settings_from_config(c: &Value) -> CosmeticSettings {
     let cos = obj("cosmetics");
     let sky = obj("sky");
     let ke = obj("killEffects");
+    let qol = obj("qol");
     CosmeticSettings {
         cosmetics: CapeSettings {
             capes_enabled: b(cos, "capesEnabled", d.cosmetics.capes_enabled),
@@ -300,6 +314,9 @@ fn settings_from_config(c: &Value) -> CosmeticSettings {
                 .map(|v| v as u32)
                 .unwrap_or(d.kill_effects.color),
         },
+        qol: QolSettings {
+            fullbright: b(qol, "fullbright", d.qol.fullbright),
+        },
     }
 }
 
@@ -321,6 +338,15 @@ pub fn save_request(layout: &Layout, settings: &CosmeticSettings) -> Result<()> 
     let data = serde_json::to_vec_pretty(&Request { revision, settings })
         .map_err(|e| Error::json("cosmetics request", e))?;
     atomic_write(&request_path(layout), &data)
+}
+
+/// Turn Fullbright on or off (QoL page). Re-reads the current state first so
+/// cosmetics changed in game since the page was opened are not reverted.
+pub fn save_fullbright(layout: &Layout, on: bool) -> Result<CosmeticState> {
+    let mut state = load_state(layout);
+    state.settings.qol.fullbright = on;
+    save_request(layout, &state.settings)?;
+    Ok(load_state(layout))
 }
 
 // ---- image validation -------------------------------------------------------
@@ -802,5 +828,59 @@ mod tests {
             let b = std::fs::read(base.join(format!("sky/{id}.png"))).unwrap();
             validate_image(Kind::Sky, &b).unwrap();
         }
+    }
+
+    #[test]
+    fn fullbright_round_trip_and_persistence() {
+        let (_d, l) = layout();
+        // Nothing on disk yet: off.
+        assert!(!load_state(&l).settings.qol.fullbright);
+
+        let st = save_fullbright(&l, true).unwrap();
+        assert!(
+            st.settings.qol.fullbright && st.pending,
+            "pending until the mod applies it"
+        );
+        let raw: Value = serde_json::from_slice(&std::fs::read(request_path(&l)).unwrap()).unwrap();
+        assert_eq!(
+            raw["qol"]["fullbright"],
+            Value::Bool(true),
+            "shape the mod reads"
+        );
+        // A fresh read (launcher restart) sees the same state.
+        assert!(load_state(&l).settings.qol.fullbright);
+
+        // The mod applies the revision and records it in its own config.
+        let rev = raw["revision"].as_u64().unwrap();
+        let cfg = serde_json::json!({"lastLauncherCosmeticsRevision": rev, "qol": {"fullbright": true},
+            "cosmetics": {"cape": "ember"}});
+        std::fs::write(client_config_path(&l), serde_json::to_vec(&cfg).unwrap()).unwrap();
+        let st = load_state(&l);
+        assert!(st.settings.qol.fullbright && !st.pending);
+
+        // Turning it off keeps other settings that changed in game.
+        let st = save_fullbright(&l, false).unwrap();
+        assert!(!st.settings.qol.fullbright);
+        assert_eq!(st.settings.cosmetics.cape, "ember");
+    }
+
+    #[test]
+    fn fullbright_tolerates_old_or_broken_files() {
+        let (_d, l) = layout();
+        // Request written by an older launcher (no "qol").
+        std::fs::write(
+            request_path(&l),
+            br#"{"revision":5,"cosmetics":{"capesEnabled":true,"cape":"none","animatedCapes":true},
+               "sky":{"enabled":false,"preset":"dusk","brightness":1.0,"rotate":true},
+               "killEffects":{"enabled":true,"effect":"burst","intensity":1.0,"sounds":true,"color":4293427002}}"#,
+        )
+        .unwrap();
+        let st = load_state(&l);
+        assert!(st.pending && !st.settings.qol.fullbright);
+        // Malformed request and config -> defaults, never a panic.
+        std::fs::write(request_path(&l), b"{ nope").unwrap();
+        std::fs::write(client_config_path(&l), br#"{"qol": {"fullbright": "yes"}}"#).unwrap();
+        assert!(!load_state(&l).settings.qol.fullbright);
+        assert!(save_fullbright(&l, true).unwrap().settings.qol.fullbright);
     }
 }
