@@ -303,8 +303,24 @@ final class MoreEffects {
         }
 
         @Override
+        void render(float pt, double cx, double cy, double cz) {
+            // Purple rings collapsing into the body, then a short bright flash.
+            float t = Math.min(1f, (age + pt) / lifetimeTicks());
+            float a = Math.min(1f, intensity) * (t < 0.75f ? 0.25f + t : (1 - t) * 4f);
+            if (a <= 0.01f) return;
+            beginGlow(x - cx, y - cy, z - cz);
+            Tessellator tess = Tessellator.getInstance();
+            WorldRenderer wr = tess.getWorldRenderer();
+            double r = 1.4 * (1 - t) + 0.15;
+            for (int s = 0; s < 4; s++) {
+                ring(wr, 0.3 + s * 0.45, r * 0.75, r, 24, 0.7f, 0.25f, 1.0f, 0f, a * 0.6f);
+            }
+            end();
+        }
+
+        @Override
         int lifetimeTicks() {
-            return 8;
+            return 10;
         }
     }
 

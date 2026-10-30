@@ -19,18 +19,28 @@ use std::path::PathBuf;
 use kestrel_core::paths::Layout;
 
 /// Data root: `--root <dir>`, else `$KESTREL_HOME`, else the platform default.
+/// A relative root is made absolute: the game runs with its instance folder as
+/// the working directory, so a relative game dir would resolve twice.
 fn data_root() -> PathBuf {
     let mut args = std::env::args().skip(1);
+    let mut root = None;
     while let Some(a) = args.next() {
         if a == "--root"
             && let Some(p) = args.next()
         {
-            return PathBuf::from(p);
+            root = Some(PathBuf::from(p));
+            break;
         }
     }
-    std::env::var_os("KESTREL_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(Layout::default_root)
+    let root = root
+        .or_else(|| std::env::var_os("KESTREL_HOME").map(PathBuf::from))
+        .unwrap_or_else(Layout::default_root);
+    absolute_root(root)
+}
+
+fn absolute_root(root: PathBuf) -> PathBuf {
+    // Falls back to the path as given if the current directory is unavailable.
+    std::path::absolute(&root).unwrap_or(root)
 }
 
 fn install_crash_handler(log_dir: PathBuf) {
@@ -138,4 +148,18 @@ fn main() -> eframe::Result {
         data_root().join("logs").join("launcher.log").display()
     ));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_roots_become_absolute() {
+        let p = absolute_root(PathBuf::from("dist/qol-test/data"));
+        assert!(p.is_absolute());
+        assert!(p.ends_with("dist/qol-test/data"));
+        let abs = std::env::temp_dir();
+        assert_eq!(absolute_root(abs.clone()), abs);
+    }
 }

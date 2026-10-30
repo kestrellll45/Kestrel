@@ -19,6 +19,9 @@ Only for a player you hit yourself, and only when the kill is clearly yours:
   makes you the killer: "<victim> was slain by <you>", "<you> killed <victim>". Lines such as
   "<you> was slain by <victim>", "... assisted by <you>" and player chat never match.
   Implemented in `KillMessageMatcher` (unit-tested).
+- Known limit of the health path: damage of any kind that lands within 1 s of your hit
+  counts as yours (the client cannot see the damage source), much like vanilla credits a
+  fall or lava death shortly after a hit to the last attacker.
 - If attribution is unclear, nothing plays. A kill confirmed both ways plays once; the same
   victim cannot trigger another effect for 6 s.
 

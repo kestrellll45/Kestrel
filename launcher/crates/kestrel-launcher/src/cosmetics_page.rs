@@ -429,7 +429,7 @@ impl CosmeticsPage {
                                     ui.label(RichText::new("COLOUR").small().color(WARN));
                                 }
                                 if equipped {
-                                    ui.label(RichText::new("✔ EQUIPPED").small().color(ACCENT));
+                                    ui.label(RichText::new("EQUIPPED").small().color(ACCENT));
                                 }
                             });
                             ui.label(RichText::new(e.desc).small().color(MUTED));
@@ -850,8 +850,9 @@ impl CosmeticsPage {
 }
 
 /// How many cards of `card_w` fit in the available width (at least one).
+/// Each card is drawn 4 px wider than `card_w` (frame stroke on both sides).
 fn columns(ui: &egui::Ui, card_w: f32) -> usize {
-    ((ui.available_width() + 10.0) / (card_w + 10.0))
+    ((ui.available_width() + 10.0) / (card_w + 14.0))
         .floor()
         .max(1.0) as usize
 }
@@ -1034,7 +1035,7 @@ fn item_card(
                 });
                 ui.horizontal(|ui| {
                     if equipped {
-                        ui.label(RichText::new("✔ EQUIPPED").small().color(ACCENT));
+                        ui.label(RichText::new("EQUIPPED").small().color(ACCENT));
                     } else {
                         ui.label(RichText::new("Click to equip").small().color(MUTED));
                     }
@@ -1074,8 +1075,11 @@ fn thumb(
 ) {
     match (tex, err) {
         (Some(t), _) => {
+            // The size is exact: a cape strip's frame is shown through `uv`, so
+            // the texture's own aspect ratio must not shrink it.
             let mut img = egui::Image::new(t)
                 .fit_to_exact_size(size)
+                .maintain_aspect_ratio(false)
                 .corner_radius(CornerRadius::same(4));
             if let Some(uv) = uv {
                 img = img.uv(uv);
