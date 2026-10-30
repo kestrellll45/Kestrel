@@ -7,7 +7,7 @@ import net.minecraft.client.audio.PositionedSoundRecord;
 import net.minecraft.util.ResourceLocation;
 
 public final class ActionButton extends Widget {
-    private final String label;
+    private String label;
     private final Runnable action;
     private final boolean primary;
     public boolean enabled = true;
@@ -16,6 +16,10 @@ public final class ActionButton extends Widget {
         this.label = label;
         this.primary = primary;
         this.action = action;
+    }
+
+    public void setLabel(String label) {
+        this.label = label;
     }
 
     @Override

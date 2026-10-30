@@ -76,7 +76,7 @@ public final class ImageValidation {
         return parseHeader(head, file.getName());
     }
 
-    static Dimensions parseHeader(byte[] head, String name) throws InvalidImageException {
+    public static Dimensions parseHeader(byte[] head, String name) throws InvalidImageException {
         for (int i = 0; i < PNG_SIGNATURE.length; i++) {
             if (head[i] != PNG_SIGNATURE[i]) {
                 throw new InvalidImageException(name + " is not a PNG image");

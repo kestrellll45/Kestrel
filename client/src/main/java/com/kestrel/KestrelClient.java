@@ -14,6 +14,8 @@ import com.kestrel.gui.HudEditorScreen;
 import com.kestrel.hud.CrosshairRenderer;
 import com.kestrel.hud.HudManager;
 import com.kestrel.camera.CameraController;
+import com.kestrel.skin.MainMenuButton;
+import com.kestrel.skin.SkinManager;
 import com.kestrel.input.InputManager;
 import com.kestrel.input.ToggleSprint;
 import com.kestrel.performance.PerformanceManager;
@@ -41,6 +43,7 @@ public final class KestrelClient {
     private CrosshairRenderer crosshair;
     private InputManager input;
     private CameraController camera;
+    private SkinManager skins;
     private ToggleSprint toggleSprint;
     private CapeManager capes;
     private SkyManager sky;
@@ -76,6 +79,7 @@ public final class KestrelClient {
         crosshair = new CrosshairRenderer(this);
         capes = new CapeManager(this, new File(dataDir, "capes"));
         sky = new SkyManager(this, new File(dataDir, "skies"));
+        skins = new SkinManager(this, dataDir);
         killEffects = new KillEffectManager(this);
         killDetector = new KillDetector(this, killEffects);
 
@@ -94,11 +98,12 @@ public final class KestrelClient {
         cfg.validate();
         configManager.markDirty();
         applyQol(cfg);
+        skins.loadNow(); // local skin chosen in the launcher or in game
 
         input.registerKeybinds();
         camera.registerKeybinds();
         ActivityReporter activity = new ActivityReporter(System.getProperty("kestrel.activityToken"));
-        Object[] listeners = {this, performance, input, camera, toggleSprint, hud, crosshair, capes, sky, killEffects, killDetector, launcherSync, activity};
+        Object[] listeners = {this, performance, input, camera, toggleSprint, hud, crosshair, capes, sky, killEffects, killDetector, launcherSync, activity, skins, new MainMenuButton(this, skins)};
         for (Object l : listeners) {
             MinecraftForge.EVENT_BUS.register(l);
         }
@@ -180,6 +185,10 @@ public final class KestrelClient {
 
     public InputManager input() {
         return input;
+    }
+
+    public SkinManager skins() {
+        return skins;
     }
 
     public CameraController camera() {
