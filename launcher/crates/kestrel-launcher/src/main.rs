@@ -2,6 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod bundled_previews;
 mod cosmetics_page;
 mod embedded;
 mod graphics;

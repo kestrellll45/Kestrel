@@ -39,6 +39,38 @@ final class Effects {
                 return new Explosion(x, y, z, intensity, budget);
             case LIGHTNING:
                 return new Lightning(x, y, z, intensity, budget);
+            case FIREWORKS:
+                return new MoreEffects.Fireworks(x, y, z, intensity, budget, color);
+            case SMOKE:
+                return new MoreEffects.Smoke(x, y, z, intensity, budget);
+            case SOUL:
+                return new MoreEffects.Soul(x, y, z, intensity, budget);
+            case ENDER:
+                return new MoreEffects.Ender(x, y, z, intensity, budget);
+            case SHOCK:
+                return new MoreEffects.Shock(x, y, z, intensity, budget);
+            case ICE:
+                return new MoreEffects.Ice(x, y, z, intensity, budget);
+            case RAINBOW:
+                return new MoreEffects.Rainbow(x, y, z, intensity, budget);
+            case NETHER:
+                return new MoreEffects.Nether(x, y, z, intensity, budget);
+            case DRAGON:
+                return new MoreEffects.Dragon(x, y, z, intensity, budget);
+            case PIXEL:
+                return new MoreEffects.Pixel(x, y, z, intensity, budget);
+            case ENERGY:
+                return new MoreEffects.Energy(x, y, z, intensity, budget, color);
+            case STARFALL:
+                return new MoreEffects.Starfall(x, y, z, intensity, budget);
+            case PORTAL:
+                return new MoreEffects.Portal(x, y, z, intensity, budget);
+            case TORNADO:
+                return new MoreEffects.Tornado(x, y, z, intensity, budget);
+            case CONFETTI:
+                return new MoreEffects.Confetti(x, y, z, intensity, budget);
+            case KESTREL:
+                return new MoreEffects.Kestrel(x, y, z, intensity, budget);
             case BURST:
             default:
                 return new Burst(x, y, z, intensity, budget);

@@ -34,7 +34,7 @@ public final class KillMessageMatcher {
         StringBuilder b = new StringBuilder(s.length());
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-            if (c == '§' && i + 1 < s.length()) {
+            if (c == '\u00a7' && i + 1 < s.length()) {
                 i++;
                 continue;
             }

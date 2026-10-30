@@ -160,7 +160,7 @@ angles (`EntityRenderer.orientCamera`, `Entity.setAngles`, `ActiveRenderInfo`,
 | Capes | `RenderPlayerEvent.Post`: your selected cape on you, catalog-assigned capes on their owners (UUID); replicates `RendererLivingEntity` transforms and vanilla `LayerCape` motion. PNG strips and GIFs (own compositing, per-frame timing), see CAPES.md |
 | Activity (Discord) | `ClientTickEvent`: logs `[Kestrel] activity <token>: menu/singleplayer/multiplayer` on change |
 | Skies | Forge `WorldProvider#setSkyRenderer` (Overworld only; uninstalled when disabled) |
-| Kill effects | `AttackEntityEvent` (who you hit) + `ClientTickEvent` (health ≤ 0) + `ClientChatReceivedEvent` (kill feed naming you and the victim) → `KillEffectManager` |
+| Kill effects | Players only. `AttackEntityEvent` (who you hit) + `ClientTickEvent` (victim's hurt events, health ≤ 0, other attackers nearby → `KillAttribution`) + `ClientChatReceivedEvent` (kill feed that makes you the killer → `KillMessageMatcher`) → `KillEffectManager`; see KILL_EFFECTS.md |
 | Frame stats | `RenderTickEvent` (ring buffer, avg + 1% low) |
 | Zoom / free-look | `RenderTickEvent(START)` reads the keys and advances `ZoomState`/`FreeLookState`; mixins read the per-frame values from `CameraHooks` (see ZOOM_FREELOOK.md) |
 | Local skin | `SkinManager` (`ClientTickEvent` polls `skins/skin.json`) + skin mixins; main-menu button via `GuiScreenEvent.InitGuiEvent`/`ActionPerformedEvent` (see SKINS.md) |

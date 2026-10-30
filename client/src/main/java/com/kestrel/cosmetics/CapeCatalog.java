@@ -31,6 +31,8 @@ import java.util.UUID;
 public final class CapeCatalog {
     /** Matches the 64-px vanilla sheet, as used by the bundled PNG presets. */
     private static final int DEFAULT_SCALE = 8;
+    /** Menu categories, in display order. */
+    public static final String[] CATEGORIES = {"static", "animated", "special", "kestrel"};
 
     public static final class Entry {
         public final String id;
@@ -44,8 +46,13 @@ public final class CapeCatalog {
         public final CapeLayout.Spec layout;
         /** Normalised owner UUIDs (32 lower-case hex), or null if unrestricted. */
         private final Set<String> owners;
+        /** Menu category: one of {@link #CATEGORIES}. */
+        public final String category;
+        /** Frame rate of an animated PNG strip; 0 = use the player's animation setting. */
+        public final int fps;
 
-        Entry(String id, String name, String texture, String fallback, CapeLayout.Spec layout, Set<String> owners) {
+        Entry(String id, String name, String texture, String fallback, CapeLayout.Spec layout, Set<String> owners,
+              String category, int fps) {
             this.id = id;
             this.name = name;
             this.texture = texture;
@@ -53,6 +60,18 @@ public final class CapeCatalog {
             this.gif = texture.toLowerCase(Locale.ROOT).endsWith(".gif");
             this.layout = layout;
             this.owners = owners == null ? null : Collections.unmodifiableSet(owners);
+            this.category = category;
+            this.fps = fps;
+        }
+
+        /** Animated: a GIF, a strip with its own frame rate, or in the animated category. */
+        public boolean animated() {
+            return gif || fps > 0 || "animated".equals(category);
+        }
+
+        /** Thumbnail (outer face; animated capes: frames side by side) under textures/. */
+        public String thumbnail() {
+            return "capes/thumbs/" + id + ".png";
         }
 
         public boolean restricted() {
@@ -166,7 +185,17 @@ public final class CapeCatalog {
                 }
                 // An empty list stays an empty (deny-all) set: fail closed.
             }
-            out.add(new Entry(id, name, texture, fallback, spec, owners));
+            String category = o.has("category") ? reqString(o, "category") : "static";
+            if (!java.util.Arrays.asList(CATEGORIES).contains(category)) {
+                throw new IllegalArgumentException(id + ": unknown category " + category);
+            }
+            int fps = 0;
+            if (o.has("fps")) {
+                fps = o.get("fps").getAsInt();
+                if (fps < 1 || fps > 60) throw new IllegalArgumentException(id + ": fps must be 1-60");
+                if (texture.endsWith(".gif")) throw new IllegalArgumentException(id + ": GIFs use their own timing; remove fps");
+            }
+            out.add(new Entry(id, name, texture, fallback, spec, owners, category, fps));
         }
         return new CapeCatalog(out);
     }

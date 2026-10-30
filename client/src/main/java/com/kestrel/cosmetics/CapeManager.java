@@ -62,10 +62,18 @@ public final class CapeManager {
     public static final class Option {
         public final String id;
         public final String name;
+        /** "none", "custom", or a catalog category ({@link CapeCatalog#CATEGORIES}). */
+        public final String category;
+        public final boolean animated;
+        /** Catalog entry, null for "none" and custom files. */
+        public final CapeCatalog.Entry entry;
 
-        Option(String id, String name) {
+        Option(String id, String name, String category, boolean animated, CapeCatalog.Entry entry) {
             this.id = id;
             this.name = name;
+            this.category = category;
+            this.animated = animated;
+            this.entry = entry;
         }
     }
 
@@ -140,12 +148,14 @@ public final class CapeManager {
     /** Capes the local player may choose: unrestricted ones plus restricted ones they own. */
     public List<Option> options() {
         List<Option> out = new ArrayList<Option>();
-        out.add(new Option(NONE, "None"));
+        out.add(new Option(NONE, "None", "none", false, null));
         String me = localUuid();
         for (CapeCatalog.Entry e : catalog.entries()) {
-            if (e.allows(me)) out.add(new Option(e.id, e.name));
+            if (e.allows(me)) out.add(new Option(e.id, e.name, e.category, e.animated(), e));
         }
-        for (String f : customFiles) out.add(new Option(CUSTOM_PREFIX + f, "Custom: " + f));
+        for (String f : customFiles) {
+            out.add(new Option(CUSTOM_PREFIX + f, f, "custom", f.toLowerCase(Locale.ROOT).endsWith(".gif"), null));
+        }
         return out;
     }
 
@@ -355,7 +365,14 @@ public final class CapeManager {
 
     private static Decoded decodeBundled(CapeCatalog.Entry e) throws IOException {
         if (!e.gif) {
-            return decodePngStrip(readBundled(TEXTURE_ROOT + e.texture, MAX_FILE_BYTES), e.name);
+            Decoded d = decodePngStrip(readBundled(TEXTURE_ROOT + e.texture, MAX_FILE_BYTES), e.name);
+            if (e.fps > 0 && d.frames.length > 1) {
+                // The catalog fixes this animation's speed (independent of the player's FPS setting).
+                int[] delays = new int[d.frames.length];
+                java.util.Arrays.fill(delays, Math.max(1, Math.round(1000f / e.fps)));
+                return new Decoded(d.frames, FrameTimeline.ofDelays(delays), null);
+            }
+            return d;
         }
         try {
             return decodeGif(readBundled(TEXTURE_ROOT + e.texture, GifDecoder.CAPE_LIMITS.maxBytes), e.layout);

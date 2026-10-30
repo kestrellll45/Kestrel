@@ -152,4 +152,53 @@ public class CapeCatalogTest {
         com.kestrel.util.ImageValidation.validateCape(
                 new com.kestrel.util.ImageValidation.Dimensions(fallback.getWidth(), fallback.getHeight()));
     }
+
+    @Test
+    public void bundledCatalogHasCategorisedStaticAndAnimatedCapes() throws Exception {
+        CapeCatalog c = bundled();
+        int animated = 0;
+        int still = 0;
+        java.util.Set<String> used = new java.util.HashSet<String>();
+        for (CapeCatalog.Entry e : c.entries()) {
+            assertTrue(e.id + ": category " + e.category, java.util.Arrays.asList(CapeCatalog.CATEGORIES).contains(e.category));
+            used.add(e.category);
+            if (e.animated()) animated++;
+            else still++;
+            // Every cape has a menu thumbnail: whole 10:16 faces side by side.
+            java.awt.image.BufferedImage t = javax.imageio.ImageIO.read(
+                    new java.io.ByteArrayInputStream(GifDecoderTest.resource("/assets/kestrel/textures/" + e.thumbnail())));
+            int faceW = t.getHeight() * 10 / 16;
+            assertEquals(e.id + ": thumbnail is whole faces", 0, t.getWidth() % faceW);
+            if (e.fps > 0) {
+                assertTrue(e.id + ": animated thumbnail needs frames", t.getWidth() / faceW > 1);
+                assertFalse(e.id + ": fps is for PNG strips", e.gif);
+            }
+        }
+        assertTrue("static capes: " + still, still >= 25);
+        assertTrue("animated capes: " + animated, animated >= 12);
+        assertEquals(java.util.Arrays.asList(CapeCatalog.CATEGORIES).size(), used.size());
+    }
+
+    @Test
+    public void categoryAndFpsAreValidated() {
+        String base = "{\"capes\":[{\"id\":\"x\",\"name\":\"X\",\"texture\":\"capes/x.png\"";
+        CapeCatalog ok = CapeCatalog.parse(base + "}]}");
+        assertEquals("static", ok.get("x").category);
+        assertEquals(0, ok.get("x").fps);
+        assertEquals(12, CapeCatalog.parse(base + ",\"category\":\"animated\",\"fps\":12}]}").get("x").fps);
+        String[] bad = {
+                base + ",\"category\":\"nope\"}]}",
+                base + ",\"fps\":0}]}",
+                base + ",\"fps\":61}]}",
+                "{\"capes\":[{\"id\":\"x\",\"name\":\"X\",\"texture\":\"capes/x.gif\",\"fps\":10}]}",
+        };
+        for (String json : bad) {
+            try {
+                CapeCatalog.parse(json);
+                fail("accepted: " + json);
+            } catch (IllegalArgumentException expected) {
+                // ok
+            }
+        }
+    }
 }

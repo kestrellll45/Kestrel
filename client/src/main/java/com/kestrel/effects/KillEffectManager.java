@@ -55,37 +55,17 @@ public final class KillEffectManager {
         }
         active.add(Effects.create(type, x, y, z, cfg.intensity, cfg.maxParticles, cfg.color));
         if (cfg.sounds && cfg.volume > 0) {
-            String sound;
-            float pitch;
-            switch (type) {
-                case LIGHTNING:
-                    sound = "ambient.weather.thunder";
-                    pitch = 1.4f;
-                    break;
-                case EXPLOSION:
-                    sound = "random.explode";
-                    pitch = 1.2f;
-                    break;
-                case FLAMES:
-                    sound = "mob.ghast.fireball";
-                    pitch = 1.0f;
-                    break;
-                case HEARTS:
-                    sound = "random.levelup";
-                    pitch = 1.6f;
-                    break;
-                case ARCANE:
-                    sound = "mob.endermen.portal";
-                    pitch = 1.2f;
-                    break;
-                default:
-                    sound = "random.orb";
-                    pitch = 0.6f;
-                    break;
-            }
-            Minecraft.getMinecraft().getSoundHandler().playSound(
-                    new PositionedSoundRecord(new ResourceLocation(sound), cfg.volume, pitch, (float) x, (float) y, (float) z));
+            Minecraft.getMinecraft().getSoundHandler().playSound(new PositionedSoundRecord(
+                    new ResourceLocation(type.sound), cfg.volume, type.pitch, (float) x, (float) y, (float) z));
         }
+    }
+
+    /** Play a specific effect in front of the player (in-game picker preview). */
+    public void preview(KillEffectType type) {
+        EntityPlayerSP p = Minecraft.getMinecraft().thePlayer;
+        if (p == null) return;
+        Vec3 look = p.getLookVec();
+        play(type, p.posX + look.xCoord * 4, p.posY, p.posZ + look.zCoord * 4, client.config().killEffects);
     }
 
     @SubscribeEvent
