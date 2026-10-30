@@ -9,6 +9,7 @@ mod logger;
 mod presence;
 mod qol_page;
 mod selfcheck;
+mod skin_page;
 mod updater;
 mod worker;
 

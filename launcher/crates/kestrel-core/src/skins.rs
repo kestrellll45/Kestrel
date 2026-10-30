@@ -287,6 +287,112 @@ fn is_slim(img: &crate::cosmetics::Rgba) -> bool {
     (20..32).all(|y| alpha(54, y) == 0 && alpha(55, y) == 0)
 }
 
+// ---- preview ----------------------------------------------------------------
+
+/// Width/height of one view in [`preview`] (a 16x32 front or back view).
+pub const VIEW_W: u32 = 16;
+pub const VIEW_H: u32 = 32;
+/// Gap between the front and back view.
+pub const VIEW_GAP: u32 = 4;
+
+/// Flat front and back views of a skin, side by side (36x32 RGBA), with the
+/// second (hat/jacket/sleeve/pants) layer drawn over the base layer. Like the
+/// game, the base layer is drawn opaque; legacy 64x32 skins get mirrored left
+/// limbs, exactly as Minecraft 1.8 converts them.
+pub fn preview(img: &crate::cosmetics::Rgba, slim: bool) -> crate::cosmetics::Rgba {
+    let w = VIEW_W * 2 + VIEW_GAP;
+    let mut out = crate::cosmetics::Rgba {
+        width: w,
+        height: VIEW_H,
+        pixels: vec![0; (w * VIEW_H * 4) as usize],
+    };
+    let legacy = img.height == 32;
+    let aw = if slim && !legacy { 3 } else { 4 };
+    // (src x, src y, width, height, dst x, dst y, mirror, overlay)
+    type Part = (u32, u32, u32, u32, u32, u32, bool, bool);
+    let mut parts: Vec<Part> = Vec::with_capacity(24);
+    // Front view: the player's right side is on the viewer's left.
+    parts.extend([
+        (8, 8, 8, 8, 4, 0, false, false),
+        (20, 20, 8, 12, 4, 8, false, false),
+        (44, 20, aw, 12, 4 - aw, 8, false, false),
+        (4, 20, 4, 12, 4, 20, false, false),
+    ]);
+    if legacy {
+        parts.extend([
+            (44, 20, 4, 12, 12, 8, true, false),
+            (4, 20, 4, 12, 8, 20, true, false),
+        ]);
+    } else {
+        parts.extend([
+            (36, 52, aw, 12, 12, 8, false, false),
+            (20, 52, 4, 12, 8, 20, false, false),
+        ]);
+    }
+    parts.push((40, 8, 8, 8, 4, 0, false, true));
+    if !legacy {
+        parts.extend([
+            (20, 36, 8, 12, 4, 8, false, true),
+            (44, 36, aw, 12, 4 - aw, 8, false, true),
+            (52, 52, aw, 12, 12, 8, false, true),
+            (4, 36, 4, 12, 4, 20, false, true),
+            (4, 52, 4, 12, 8, 20, false, true),
+        ]);
+    }
+    // Back view: the player's left side is on the viewer's left.
+    let bx = VIEW_W + VIEW_GAP;
+    let r_back = 40 + 4 + aw + 4; // right arm back face
+    let l_back = 32 + 4 + aw + 4; // left arm back face
+    parts.extend([
+        (24, 8, 8, 8, bx + 4, 0, false, false),
+        (32, 20, 8, 12, bx + 4, 8, false, false),
+        (r_back, 20, aw, 12, bx + 12, 8, false, false),
+        (12, 20, 4, 12, bx + 8, 20, false, false),
+    ]);
+    if legacy {
+        parts.extend([
+            (r_back, 20, 4, 12, bx, 8, true, false),
+            (12, 20, 4, 12, bx + 4, 20, true, false),
+        ]);
+    } else {
+        parts.extend([
+            (l_back, 52, aw, 12, bx + 4 - aw, 8, false, false),
+            (28, 52, 4, 12, bx + 4, 20, false, false),
+        ]);
+    }
+    parts.push((56, 8, 8, 8, bx + 4, 0, false, true));
+    if !legacy {
+        parts.extend([
+            (32, 36, 8, 12, bx + 4, 8, false, true),
+            (r_back, 36, aw, 12, bx + 12, 8, false, true),
+            (l_back + 16, 52, aw, 12, bx + 4 - aw, 8, false, true),
+            (12, 36, 4, 12, bx + 8, 20, false, true),
+            (12, 52, 4, 12, bx + 4, 20, false, true),
+        ]);
+    }
+    for (sx, sy, pw, ph, dx, dy, mirror, overlay) in parts {
+        for y in 0..ph {
+            for x in 0..pw {
+                let srcx = if mirror { sx + pw - 1 - x } else { sx + x };
+                let si = (((sy + y) * img.width + srcx) * 4) as usize;
+                let di = (((dy + y) * w + dx + x) * 4) as usize;
+                let src = &img.pixels[si..si + 4];
+                if !overlay {
+                    out.pixels[di..di + 3].copy_from_slice(&src[..3]);
+                    out.pixels[di + 3] = 255;
+                } else if src[3] > 0 {
+                    let a = src[3] as u32;
+                    for (d, &sc) in out.pixels[di..di + 3].iter_mut().zip(&src[..3]) {
+                        *d = ((sc as u32 * a + *d as u32 * (255 - a)) / 255) as u8;
+                    }
+                    out.pixels[di + 3] = out.pixels[di + 3].max(src[3]);
+                }
+            }
+        }
+    }
+    out
+}
+
 // ---- import -----------------------------------------------------------------
 
 /// Copy validated skin bytes into the skins folder and add (or refresh) the
@@ -509,7 +615,7 @@ pub struct Downloaded {
 /// three Mojang hosts below.
 pub type Fetch<'a> = dyn Fn(&str, u64) -> std::result::Result<Vec<u8>, String> + 'a;
 
-const NAMEMC_SKIN_PAGE_HELP: &str = "NameMC skin pages (namemc.com/skin/…) can't be loaded automatically: NameMC has no \
+pub const NAMEMC_SKIN_PAGE_HELP: &str = "NameMC skin pages (namemc.com/skin/…) can't be loaded automatically: NameMC has no \
 public API for them and blocks automated downloads. Open the page in your browser, click Download, then use \
 Import Skin with the saved PNG. NameMC profile links (namemc.com/profile/<name>) work directly.";
 
@@ -989,5 +1095,64 @@ mod tests {
                 .unwrap_err()
                 .contains("refusing")
         );
+    }
+
+    #[test]
+    fn preview_layout() {
+        // Encode each texel's position in its colour.
+        let img = crate::cosmetics::decode_png(&png(64, 64, |x, y| {
+            [
+                x as u8,
+                y as u8,
+                0,
+                if y >= 32 || (x >= 32 && y < 16) {
+                    0
+                } else {
+                    255
+                },
+            ]
+        }))
+        .unwrap();
+        let p = preview(&img, false);
+        assert_eq!((p.width, p.height), (36, 32));
+        let at = |x: u32, y: u32| {
+            &p.pixels[((y * p.width + x) * 4) as usize..((y * p.width + x) * 4 + 4) as usize]
+        };
+        assert_eq!(at(4, 0), &[8, 8, 0, 255]); // head front, top-left
+        assert_eq!(at(0, 8), &[44, 20, 0, 255]); // right arm front
+        assert_eq!(at(4, 20), &[4, 20, 0, 255]); // right leg front
+        assert_eq!(at(24, 0), &[24, 8, 0, 255]); // head back
+        assert_eq!(at(32, 8), &[52, 20, 0, 255]); // right arm back (viewer's right)
+        assert_eq!(at(2, 30)[3], 0); // empty corner stays transparent
+        // Slim: 3 px arms, right arm back face starts at x=51.
+        let s = preview(&img, true);
+        let sat = |x: u32, y: u32| s.pixels[((y * s.width + x) * 4) as usize];
+        assert_eq!(sat(1, 8), 44);
+        assert_eq!(s.pixels[((8 * s.width) * 4 + 3) as usize], 0); // column 0 empty
+        assert_eq!(sat(32, 8), 51);
+        // Legacy: left limbs mirror the right ones.
+        let legacy =
+            crate::cosmetics::decode_png(&png(64, 32, |x, y| [x as u8, y as u8, 0, 255])).unwrap();
+        let l = preview(&legacy, true);
+        let lat = |x: u32, y: u32| l.pixels[((y * l.width + x) * 4) as usize];
+        assert_eq!(lat(12, 8), 47); // mirrored right arm front (44..48 reversed)
+        assert_eq!(lat(0, 8), 44); // slim ignored for legacy
+    }
+
+    #[test]
+    fn preview_blends_overlay() {
+        let img = crate::cosmetics::decode_png(&png(64, 64, |x, y| {
+            if (40..48).contains(&x) && (8..16).contains(&y) {
+                [255, 0, 0, 128]
+            } else {
+                [0, 0, 255, 0]
+            }
+        }))
+        .unwrap();
+        let p = preview(&img, false);
+        let px = &p.pixels[(4 * 4)..(4 * 4 + 4)];
+        assert_eq!(px[3], 255); // base made opaque
+        // 50% red over the (now opaque) blue base.
+        assert_eq!(px, &[128, 0, 127, 255]);
     }
 }
