@@ -67,4 +67,25 @@ public class StaticFovTest {
             assertEquals(first, StaticFov.fov(false, true, 95.0f), 0.0f);
         }
     }
+
+    @Test
+    public void zoomAppliesToTheWorldViewOnly() {
+        assertEquals(25.0f, StaticFov.fov(false, true, 100.0f, 0.25f), 1e-5f);
+        assertEquals(StaticFov.HAND_FOV, StaticFov.fov(false, false, 100.0f, 0.25f), 0.0f);
+        assertEquals(StaticFov.DEBUG_VIEW_FOV, StaticFov.fov(true, true, 100.0f, 0.25f), 0.0f);
+        // No zoom, or nonsense values: exactly the static FOV.
+        for (float m : new float[] {1.0f, 1.5f, 0.0f, -1.0f, Float.NaN}) {
+            assertEquals(90.0f, StaticFov.fov(false, true, 90.0f, m), 0.0f);
+        }
+    }
+
+    @Test
+    public void zoomUsesTheLiveSettingSoItNeverStacks() {
+        // Frame after frame at the same zoom level gives the same FOV; changing
+        // the setting while zoomed applies immediately.
+        for (int i = 0; i < 100; i++) {
+            assertEquals(20.0f, StaticFov.fov(false, true, 80.0f, 0.25f), 1e-5f);
+        }
+        assertEquals(27.5f, StaticFov.fov(false, true, 110.0f, 0.25f), 1e-5f);
+    }
 }

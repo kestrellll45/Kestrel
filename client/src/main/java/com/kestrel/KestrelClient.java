@@ -13,6 +13,7 @@ import com.kestrel.gui.ClientSettingsScreen;
 import com.kestrel.gui.HudEditorScreen;
 import com.kestrel.hud.CrosshairRenderer;
 import com.kestrel.hud.HudManager;
+import com.kestrel.camera.CameraController;
 import com.kestrel.input.InputManager;
 import com.kestrel.input.ToggleSprint;
 import com.kestrel.performance.PerformanceManager;
@@ -39,6 +40,7 @@ public final class KestrelClient {
     private HudManager hud;
     private CrosshairRenderer crosshair;
     private InputManager input;
+    private CameraController camera;
     private ToggleSprint toggleSprint;
     private CapeManager capes;
     private SkyManager sky;
@@ -68,6 +70,7 @@ public final class KestrelClient {
         ClientConfig cfg = configManager.get();
         performance = new PerformanceManager();
         input = new InputManager(this);
+        camera = new CameraController(this);
         toggleSprint = new ToggleSprint(this);
         hud = new HudManager(this); // registers HUD element defaults in the config
         crosshair = new CrosshairRenderer(this);
@@ -93,8 +96,9 @@ public final class KestrelClient {
         applyQol(cfg);
 
         input.registerKeybinds();
+        camera.registerKeybinds();
         ActivityReporter activity = new ActivityReporter(System.getProperty("kestrel.activityToken"));
-        Object[] listeners = {this, performance, input, toggleSprint, hud, crosshair, capes, sky, killEffects, killDetector, launcherSync, activity};
+        Object[] listeners = {this, performance, input, camera, toggleSprint, hud, crosshair, capes, sky, killEffects, killDetector, launcherSync, activity};
         for (Object l : listeners) {
             MinecraftForge.EVENT_BUS.register(l);
         }
@@ -176,6 +180,10 @@ public final class KestrelClient {
 
     public InputManager input() {
         return input;
+    }
+
+    public CameraController camera() {
+        return camera;
     }
 
     public ToggleSprint toggleSprint() {
