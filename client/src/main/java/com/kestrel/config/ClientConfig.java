@@ -30,6 +30,8 @@ public final class ClientConfig {
     public KillEffects killEffects = new KillEffects();
     public Performance performance = new Performance();
     public Qol qol = new Qol();
+    public Zoom zoom = new Zoom();
+    public FreeLook freeLook = new FreeLook();
 
     public static final class HudElementConfig {
         public boolean enabled = false;
@@ -170,6 +172,31 @@ public final class ClientConfig {
         public boolean fullbright = false;
     }
 
+    /** Hold-to-zoom (default key C; see {@link com.kestrel.camera.CameraController}). */
+    public static final class Zoom {
+        /** How far to zoom in: the field of view is divided by this. */
+        public float factor = 4.0f;
+        /** Transition speed (exponential rate per second; higher is faster). */
+        public float speed = 14.0f;
+        /** Animate zooming in and out; off switches instantly. */
+        public boolean smooth = true;
+        /** Lower mouse sensitivity while zoomed, in proportion to the zoom. */
+        public boolean scaleSensitivity = false;
+
+        void validate() {
+            factor = clamp(factor, 1.5f, 10.0f);
+            speed = clamp(speed, 2.0f, 40.0f);
+        }
+    }
+
+    /** 360-degree free-look (default key Left Alt). */
+    public static final class FreeLook {
+        /** Switch to third person while held (back to first person afterwards). */
+        public boolean thirdPerson = true;
+        /** Ease the camera back on release instead of returning instantly. */
+        public boolean smoothReturn = true;
+    }
+
     /** Clamp every value into a safe range and repair nulls. */
     public void validate() {
         if (hud == null) {
@@ -188,6 +215,8 @@ public final class ClientConfig {
         if (killEffects == null) killEffects = new KillEffects();
         if (performance == null) performance = new Performance();
         if (qol == null) qol = new Qol();
+        if (zoom == null) zoom = new Zoom();
+        if (freeLook == null) freeLook = new FreeLook();
         if (Preset.byId(activePreset) == null) activePreset = Preset.COMPETITIVE.id;
         if (lastLauncherPreset == null) lastLauncherPreset = "";
         crosshair.validate();
@@ -195,6 +224,7 @@ public final class ClientConfig {
         sky.validate();
         killEffects.validate();
         performance.validate();
+        zoom.validate();
     }
 
     /** Returns the element config, creating it with the given defaults if absent. */

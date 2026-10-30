@@ -135,10 +135,21 @@ other players see them only if they run a compatible client that implements them
 catalog capes are the one case where Kestrel draws a cape on another player: the catalog
 assigns them to that player's UUID (see [CAPES.md](CAPES.md)).
 
+## Skin page (launcher ↔ client)
+
+The launcher's **Skin** page and the in-game Skin screen share `instance/kestrel/skins/`
+(`kestrel-core/src/skins.rs` and `client/.../skin/SkinStore.java`, same rules on both sides).
+Unlike cosmetics there is no request/apply step: both sides read and atomically rewrite
+`skin.json` (increasing `revision`, last writer wins), and the mod polls it once a second.
+See [SKINS.md](SKINS.md).
+
 ## Client mod
 
-Pure Forge events, no mixins yet (the Mixin infrastructure is configured for later
-performance patches):
+Mostly Forge events. Mixins (`client/.../mixin`, auto-discovered) are used only where no
+event exists: Fullbright and the static FOV / zoom (`EntityRenderer`), free-look camera
+angles (`EntityRenderer.orientCamera`, `Entity.setAngles`, `ActiveRenderInfo`,
+`RenderManager`, `RenderGlobal`) and the local skin (`AbstractClientPlayer`,
+`NetworkPlayerInfo`). Every target was checked against the Forge-patched 1.8.9 bytecode.
 
 | Feature | Hook |
 |---|---|
@@ -151,6 +162,8 @@ performance patches):
 | Skies | Forge `WorldProvider#setSkyRenderer` (Overworld only; uninstalled when disabled) |
 | Kill effects | `AttackEntityEvent` (who you hit) + `ClientTickEvent` (health ≤ 0) + `ClientChatReceivedEvent` (kill feed naming you and the victim) → `KillEffectManager` |
 | Frame stats | `RenderTickEvent` (ring buffer, avg + 1% low) |
+| Zoom / free-look | `RenderTickEvent(START)` reads the keys and advances `ZoomState`/`FreeLookState`; mixins read the per-frame values from `CameraHooks` (see ZOOM_FREELOOK.md) |
+| Local skin | `SkinManager` (`ClientTickEvent` polls `skins/skin.json`) + skin mixins; main-menu button via `GuiScreenEvent.InitGuiEvent`/`ActionPerformedEvent` (see SKINS.md) |
 
 Threading: config is only touched on the game thread; saves are debounced (1 s), serialised
 on the game thread and written atomically on one IO thread. Image decoding and folder scans
@@ -184,6 +197,19 @@ Verified in the development environment (Linux, no access to Mojang/Forge/Gradle
   Discord server incl. reconnect and clear-on-exit, activity parsing). New Java files were
   type-checked against stubs of the Minecraft/Forge APIs they use, not against real 1.8.9
   classes; the Windows named-pipe branch of `discord.rs` was not compiled.
+
+- Zoom, free-look and the local skin changer (Windows PC, real build): `scripts\release.ps1`
+  (cargo fmt/clippy/test, Gradle build + JUnit against the real Forge 1.8.9 classes, release
+  exe self-check) passed; every new mixin target is present in the built refmap with its SRG
+  name. In game, with the release exe and a scratch `--root`: hold-to-zoom in/out (hand not
+  zoomed, FOV setting unchanged), free-look (third-person orbit, body and view unchanged
+  after release, crosshair hidden, chunks behind you rendered), both at once, keyboard keys
+  not sticking, the Controls entries and the settings section; skin: NameMC profile link
+  (real Mojang API), import folder, the in-game file picker, apply/restore in game and in the
+  launcher, launcher→running game and game→launcher sync, custom skin on the player in
+  first/third person. Not exercised in game: death/respawn, dimension change, disconnect
+  and Alt-Tab while a key is held (covered by the reset logic and unit tests only), the tab
+  list head on a multiplayer server, and a Microsoft account's real skin in the previews.
 
 **Not yet verified** (needs a Windows machine with internet):
 

@@ -21,6 +21,11 @@ package com.kestrel.rendering;
  * the camera's field of view changes: movement, potions, bows and flying work
  * exactly as before, and the FOV slider in Video Settings keeps working.
  * There is deliberately no setting to turn dynamic FOV back on.
+ *
+ * <p>Hold-to-zoom ({@link com.kestrel.camera.CameraController}) is the one
+ * deliberate exception: it multiplies the world-view result for the current
+ * frame only, through {@link #fov(boolean, boolean, float, float)}. The FOV
+ * setting is never written, so zoom cannot stack or persist.
  */
 public final class StaticFov {
     /** Field of view vanilla uses for the held-item view (useFOVSetting == false). */
@@ -43,5 +48,20 @@ public final class StaticFov {
             return DEBUG_VIEW_FOV;
         }
         return useFovSetting ? fovSetting : HAND_FOV;
+    }
+
+    /**
+     * Like {@link #fov(boolean, boolean, float)}, with the hold-to-zoom
+     * multiplier applied to the world view only (never to the held item or
+     * the debug camera).
+     *
+     * @param zoomMultiplier current zoom multiplier in (0, 1]; anything else counts as no zoom
+     */
+    public static float fov(boolean debugView, boolean useFovSetting, float fovSetting, float zoomMultiplier) {
+        float base = fov(debugView, useFovSetting, fovSetting);
+        if (debugView || !useFovSetting || !(zoomMultiplier > 0f) || zoomMultiplier >= 1f) {
+            return base;
+        }
+        return base * zoomMultiplier;
     }
 }

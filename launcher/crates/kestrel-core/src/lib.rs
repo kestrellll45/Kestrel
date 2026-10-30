@@ -25,6 +25,7 @@ pub mod redact;
 pub mod resourcepacks;
 pub mod runtime;
 pub mod secure;
+pub mod skins;
 pub mod sysmem;
 pub mod update;
 

@@ -16,6 +16,7 @@ use crate::cosmetics_page::CosmeticsPage;
 use crate::logger::LogBuffer;
 use crate::presence::{self, Phase};
 use crate::qol_page::QolPage;
+use crate::skin_page::SkinPage;
 use crate::updater::Updater;
 use crate::worker::{self, Msg, PlayRequest};
 
@@ -33,6 +34,7 @@ const MAX_GAME_LINES: usize = 5000;
 enum Page {
     Home,
     Cosmetics,
+    Skin,
     Qol,
     Account,
     Settings,
@@ -82,6 +84,7 @@ pub struct LauncherApp {
     total_ram: Option<u64>,
     bundled_mod: Option<PathBuf>,
     cosmetics: CosmeticsPage,
+    skin: SkinPage,
     qol: QolPage,
     updater: Updater,
     /// Discord Rich Presence (background thread; no-op until configured).
@@ -141,6 +144,7 @@ impl LauncherApp {
             total_ram: sysmem::total_mib(),
             bundled_mod,
             qol: QolPage::new(layout_for_cosmetics.clone()),
+            skin: SkinPage::new(layout_for_cosmetics.clone()),
             cosmetics: CosmeticsPage::new(layout_for_cosmetics),
             updater,
             discord: PresenceService::start(discord::system_connector()),
@@ -995,6 +999,7 @@ impl eframe::App for LauncherApp {
                 for (p, name) in [
                     (Page::Home, "Home"),
                     (Page::Cosmetics, "Cosmetics"),
+                    (Page::Skin, "Skin"),
                     (Page::Qol, "QoL"),
                     (Page::Account, "Account"),
                     (Page::Settings, "Settings"),
@@ -1025,6 +1030,9 @@ impl eframe::App for LauncherApp {
                         }
                         if p == Page::Qol {
                             self.qol.refresh();
+                        }
+                        if p == Page::Skin {
+                            self.skin.refresh();
                         }
                         self.page = p;
                     }
@@ -1081,6 +1089,17 @@ impl eframe::App for LauncherApp {
                                 .map(|a| a.uuid.as_str());
                             self.cosmetics.set_account(uuid);
                             self.cosmetics.ui(ui, self.busy == Busy::Running)
+                        }
+                        Page::Skin => {
+                            // The real account skin is previewed only for a
+                            // signed-in Microsoft account.
+                            let uuid = self
+                                .account
+                                .as_ref()
+                                .filter(|_| !self.offline_mode)
+                                .map(|a| a.uuid.as_str());
+                            self.skin.set_account(uuid);
+                            self.skin.ui(ui, self.busy == Busy::Running)
                         }
                         Page::Qol => self.qol.ui(
                             ui,

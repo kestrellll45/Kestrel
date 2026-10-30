@@ -117,6 +117,33 @@ public final class ClientSettingsScreen extends GuiScreen {
                     changed();
                 }));
                 text("Press your sprint key once to keep sprinting. Vanilla rules still apply (hunger, blindness, using items).");
+                header("Zoom & free look");
+                text("Hold C to zoom, hold Left Alt to look around without turning. Rebind both under Controls > Kestrel.");
+                content.add(new Slider("Zoom strength", 1.5f, 10f, 0.5f, () -> c.zoom.factor, v -> {
+                    c.zoom.factor = v;
+                    changed();
+                }, v -> String.format("%.1fx", v)));
+                content.add(new Toggle("Smooth zoom", () -> c.zoom.smooth, v -> {
+                    c.zoom.smooth = v;
+                    changed();
+                }));
+                content.add(new Slider("Zoom speed", 2f, 40f, 1f, () -> c.zoom.speed, v -> {
+                    c.zoom.speed = v;
+                    changed();
+                }, v -> String.valueOf(Math.round(v))));
+                content.add(new Toggle("Lower sensitivity while zoomed", () -> c.zoom.scaleSensitivity, v -> {
+                    c.zoom.scaleSensitivity = v;
+                    changed();
+                }));
+                content.add(new Toggle("Free look in third person", () -> c.freeLook.thirdPerson, v -> {
+                    c.freeLook.thirdPerson = v;
+                    changed();
+                }));
+                content.add(new Toggle("Smooth free-look return", () -> c.freeLook.smoothReturn, v -> {
+                    c.freeLook.smoothReturn = v;
+                    changed();
+                }));
+                text("Both are camera-only: your FOV setting, movement and what the server sees are unchanged.");
                 header("Presets");
                 for (final Preset p : Preset.values()) {
                     String label = p.label + (p.id.equals(c.activePreset) ? "  (active)" : "");
