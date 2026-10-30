@@ -99,9 +99,17 @@ public final class CameraController implements CameraHooks.TurnHandler {
                 switchedPerspective = true;
             }
         } else if (!lookHeld && freeLook.isHeld()) {
-            freeLook.release(cfg.freeLook.smoothReturn);
+            // Return on this very frame. If we switched to third person for
+            // free-look, going back to first person is already a cut, so the
+            // camera goes straight to the player's view with it; otherwise it
+            // eases back over at most FreeLookState.RETURN_DURATION.
+            boolean cut = switchedPerspective;
+            freeLook.release(cfg.freeLook.smoothReturn && !cut);
+            if (cut) {
+                restorePerspective(mc);
+            }
         }
-        freeLook.update(dt, player.rotationYaw, player.rotationPitch, FreeLookState.RETURN_SPEED);
+        freeLook.update(dt, player.rotationYaw, player.rotationPitch, FreeLookState.RETURN_DURATION);
         if (switchedPerspective && !freeLook.overrides()) {
             restorePerspective(mc);
         }

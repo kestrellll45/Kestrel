@@ -1,0 +1,17 @@
+{
+  "_comment": "Historical Mojang capes as local Kestrel cosmetics. Only names and Mojang texture ids are shipped; the original textures are downloaded from Mojang's texture server (https://textures.minecraft.net/texture/<textureId>) on first use and cached in instance/kestrel/mojang-capes. Equipping one does not grant or change any account cape. See documentation/CAPES.md.",
+  "capes": [
+    {"id": "minecon_2011", "name": "MINECON 2011", "textureId": "953cac8b779fe41383e675ee2b86071a71658f2180f56fbce8aa315ea70e2ed6", "about": "MINECON 2011 attendees (red, creeper face)"},
+    {"id": "minecon_2012", "name": "MINECON 2012", "textureId": "a2e8d97ec79100e90a75d369d1b3ba81273c4f82bc1b737e934eed4a854be1b6", "about": "MINECON 2012 attendees (blue, pickaxe)"},
+    {"id": "minecon_2013", "name": "MINECON 2013", "textureId": "153b1a0dfcbae953cdeb6f2c2bf6bf79943239b1372780da44bcbb29273131da", "about": "MINECON 2013 attendees (green, piston)"},
+    {"id": "minecon_2015", "name": "MINECON 2015", "textureId": "b0cc08840700447322d953a02b965f1d65a13a603bf64b17c803c21446fe1635", "about": "MINECON 2015 attendees (iron golem)"},
+    {"id": "minecon_2016", "name": "MINECON 2016", "textureId": "e7dfea16dc83c97df01a12fabbd1216359c0cd0ea42f9999b6e97c584963e980", "about": "MINECON 2016 attendees (enderman)"},
+    {"id": "realms_mapmaker", "name": "Realms MapMaker", "textureId": "17912790ff164b93196f08ba71d0e62129304776d0f347334f8a6eae509f8a56", "about": "Realms content creators (Atlas logo)"},
+    {"id": "crafter", "name": "Crafter", "textureId": "479eacefa3cdd7aca94207f36c0dd449653ddf259daf40544a5866baf05eee22", "about": "TwitchCon Europe 2026 (pickaxe on a crafting table)"},
+    {"id": "translator", "name": "Translator", "textureId": "1bf91499701404e21bd46b0191d63239a4ef76ebde88d27e4d430ac211df681e", "about": "Minecraft translation proofreaders on Crowdin"},
+    {"id": "mojang_classic", "name": "Mojang (Classic)", "textureId": "8f120319222a9f4a104e2f5cb97b2cda93199a2ee9e1585cb8d09d6f687cb761", "about": "Mojang staff cape, first design (2010-2015)"},
+    {"id": "mojang", "name": "Mojang (2015)", "textureId": "5786fe99be377dfb6858859f926c4dbc995751e91cee373468c5fbf4865e7151", "about": "Mojang staff cape, second design (2015-2021)"},
+    {"id": "cobalt", "name": "Cobalt", "textureId": "ca35c56efe71ed290385f4ab5346a1826b546a54d519e6a3ff01efa01acce81", "about": "Cobalt competition participants and winners (2016)"},
+    {"id": "mojira_moderator", "name": "Mojira Moderator", "textureId": "ae677f7d98ac70a533713518416df4452fe5700365c09cf45d0d156ea9396551", "about": "Moderators of Mojira, Mojang's bug tracker"}
+  ]
+}

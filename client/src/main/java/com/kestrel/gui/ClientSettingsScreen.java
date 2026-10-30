@@ -251,11 +251,14 @@ public final class ClientSettingsScreen extends GuiScreen {
                     capeItems.add(new TileGrid.Item(o.id, o.name, o.category, o.animated ? "ANIM" : null));
                 }
                 content.add(new TileGrid(capeItems, list2("static", "Static", "animated", "Animated", "special", "Special",
-                        "kestrel", "Kestrel", "custom", "Custom"), () -> co.cape, v -> {
+                        "kestrel", "Kestrel", "mojang", "Mojang", "custom", "Custom"), () -> co.cape, v -> {
                     co.cape = v;
                     if (!CapeManager.NONE.equals(v)) co.capesEnabled = true;
                     changed();
                 }, (mc2, it, x, y, w, h) -> drawCapeThumb(mc2, capeOpts.get(it.id), x, y, w, h), CAPE_FILTER, 40, 64));
+                text("Mojang: historical Mojang capes (MINECON 2011-2016, Mojang staff, Mojira, Realms, ...), shown by your "
+                        + "Kestrel client only. They do not grant or change any account cape. The original textures are "
+                        + "downloaded from Mojang's texture server the first time and kept on your PC.");
                 content.add(new Toggle("Animate capes", () -> co.animatedCapes, v -> {
                     co.animatedCapes = v;
                     changed();
@@ -530,6 +533,19 @@ public final class ClientSettingsScreen extends GuiScreen {
     private void drawCapeThumb(Minecraft mc, CapeManager.Option o, int x, int y, int w, int h) {
         int fw = h * 10 / 16; // one 10:16 face, centred
         int fx = x + (w - fw) / 2;
+        if (o != null && o.mojang != null) {
+            ResourceLocation tex = client.capes().previewTexture(o.id);
+            if (tex == null) {
+                placeholder(mc, client.capes().previewError(o.id) != null ? "offline" : "...", x, y, w, h);
+                return;
+            }
+            GlStateManager.color(1, 1, 1, 1);
+            GlStateManager.enableBlend();
+            mc.getTextureManager().bindTexture(tex);
+            Gui.drawScaledCustomSizeModalRect(fx, y, 1, 1, 10, 16, fw, h, 64, 32);
+            GlStateManager.disableBlend();
+            return;
+        }
         if (o == null || o.entry == null) {
             ResourceLocation live = o != null && o.id.equals(cfg().cosmetics.cape) ? client.capes().currentTexture() : null;
             if (live == null) {

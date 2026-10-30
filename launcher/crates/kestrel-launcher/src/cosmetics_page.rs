@@ -14,7 +14,7 @@ use std::time::Duration;
 use egui::{Color32, CornerRadius, Pos2, RichText, Sense, Stroke, Vec2};
 use kestrel_core::cosmetics::{
     self, CAPE_CATEGORIES, CAPE_NONE, CUSTOM_PREFIX, CosmeticSettings, KILL_EFFECT_CATEGORIES,
-    KILL_EFFECTS, Kind, Rgba, SKY_CATEGORIES,
+    KILL_EFFECTS, Kind, MOJANG_CATEGORY, MOJANG_PREFIX, Rgba, SKY_CATEGORIES,
 };
 use kestrel_core::paths::Layout;
 
@@ -236,6 +236,13 @@ impl CosmeticsPage {
             });
         }
         None
+    }
+
+    /// Forget failed previews so they are tried again (e.g. after being offline).
+    fn retry_failed_previews(&mut self) {
+        for key in std::mem::take(&mut self.preview_errors).into_keys() {
+            self.requested.remove(&key);
+        }
     }
 
     fn upload(&mut self, kind: Kind) {
@@ -653,6 +660,7 @@ impl CosmeticsPage {
                 }
                 if ui.button("Rescan").clicked() {
                     self.custom_capes = cosmetics::list_custom(&self.layout, Kind::Cape);
+                    self.retry_failed_previews();
                 }
                 ui.add_space(12.0);
                 ui.checkbox(&mut self.settings.cosmetics.capes_enabled, "Show cape");
@@ -694,6 +702,14 @@ impl CosmeticsPage {
                     fps: c.animated().then(|| c.fps.unwrap_or(DEFAULT_CAPE_FPS)),
                 }),
         );
+        items.extend(cosmetics::mojang_capes().iter().map(|m| Item {
+            id: m.selection_id(),
+            name: m.name.clone(),
+            category: MOJANG_CATEGORY.0.into(),
+            badge: None,
+            custom: false,
+            fps: None,
+        }));
         items.extend(self.custom_capes.iter().map(|f| Item {
             id: format!("{CUSTOM_PREFIX}{f}"),
             name: f.clone(),
@@ -727,10 +743,21 @@ impl CosmeticsPage {
             ui,
             "capes",
             &mut self.cape_filter,
-            &with_custom(CAPE_CATEGORIES),
+            &with_custom(&[CAPE_CATEGORIES, &[MOJANG_CATEGORY]].concat()),
             items.len(),
             total,
         );
+        if self.cape_filter.category == MOJANG_CATEGORY.0 {
+            ui.label(
+                RichText::new(
+                    "Historical Mojang capes, as local Kestrel cosmetics: only your Kestrel client shows them. \
+                     Equipping one does not give your account that cape, and other players don't see it. \
+                     The original textures are downloaded from Mojang's texture server the first time and kept on your PC.",
+                )
+                .small()
+                .color(MUTED),
+            );
+        }
         ui.add_space(6.0);
         let animate = self.settings.cosmetics.animated_capes;
         let time = ui.input(|i| i.time);
@@ -868,6 +895,12 @@ fn preview_key(kind: Kind, id: &str) -> String {
 /// embedded thumbnails (animated capes: frames side by side); custom files are
 /// read from the data folder and cropped like the game does.
 pub(crate) fn load_preview(layout: &Layout, kind: Kind, id: &str) -> Result<Rgba, String> {
+    if kind == Kind::Cape && id.starts_with(MOJANG_PREFIX) {
+        let cape = cosmetics::mojang_cape(id).ok_or("unknown cape")?;
+        let path = cosmetics::fetch_mojang_cape(layout, cape, &kestrel_core::skins::http_fetch)?;
+        let bytes = std::fs::read(&path).map_err(|e| format!("cannot read: {e}"))?;
+        return cosmetics::cape_preview_bytes(&bytes);
+    }
     if id.starts_with(CUSTOM_PREFIX) {
         let p: PathBuf = cosmetics::custom_path(layout, kind, id).ok_or("invalid file name")?;
         let bytes = std::fs::read(&p).map_err(|e| format!("cannot read: {e}"))?;
@@ -1096,7 +1129,7 @@ fn thumb(
             p.text(
                 r.rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "invalid image",
+                "unavailable",
                 egui::FontId::proportional(11.0),
                 ERR,
             );

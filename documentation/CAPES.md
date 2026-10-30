@@ -47,6 +47,28 @@ not through Minecraft's resource manager, so resource packs cannot change it.
 Existing ids never change meaning, so saved selections (`ClientConfig.cosmetics.cape`)
 keep working.
 
+## Historical Mojang capes
+
+The **Mojang** category lists 12 historical Mojang capes as *local Kestrel cosmetics*: MINECON
+2011, 2012, 2013, 2015 and 2016, Realms MapMaker, Crafter, Translator, Mojang (Classic) and
+Mojang (2015) (the first and second Mojang staff designs), Cobalt and Mojira Moderator.
+
+- Only your Kestrel client draws the one you equip. It does not grant or change any account
+  cape, nothing is sent to Mojang or to servers, and other players (vanilla or Kestrel) don't
+  see it. If you own an official cape, the game shows that one instead, as with every
+  Kestrel cape.
+- Kestrel ships only their names and Mojang texture ids
+  (`client/src/main/resources/assets/kestrel/mojang_capes.json`), not Mojang's artwork. The
+  original 64x32 textures are downloaded from Mojang's texture server
+  (`https://textures.minecraft.net/texture/<id>`) the first time one is previewed or
+  equipped, checked like an uploaded cape, and kept in `instance/kestrel/mojang-capes/`, so
+  later launches work offline. The launcher downloads over HTTPS (Mojang hosts only,
+  no redirects, 64 KB cap). In game, if Java 8 cannot verify the HTTPS certificate, Kestrel
+  falls back to HTTP from the same host, which is how vanilla 1.8.9 loads every cape; the
+  file is validated either way.
+- Delete that folder to download them again. If you were offline, press **Rescan** on the
+  launcher's Capes page (or reopen the in-game menu) to retry.
+
 ## Bundled designs
 
 `tools/gen_cosmetics.py` generates the bundled capes from code (no external art): 24 static

@@ -205,6 +205,14 @@ Verified in the development environment (Linux, no access to Mojang/Forge/Gradle
   live sky switching, every new kill effect via preview; an own player kill played the effect
   once ("<victim> was slain by <you>"), while a mob kill, your own death, a drowning and a
   /kill 3 s after your hit played nothing. Not tested: a third player stealing the kill.
+- Camera and Mojang capes (0.7.0, Windows release build): Gradle build + 119 JUnit tests pass
+  (timed zoom easing, bounded free-look return, Mojang cape list/cache), Rust fmt/clippy/tests
+  pass. In game: zoom eases in/out (checked at the slowest speed) and returns to the configured
+  FOV (tested at 69 and 108); free-look returns on the release frame in both third- and
+  first-person modes with the player's rotation unchanged; zoom and free-look together. All 12
+  Mojang capes downloaded by the game itself over HTTPS from textures.minecraft.net, previewed
+  in game and in the launcher, and rendered on the player; the selection persisted across a
+  restart (loaded from the cache); a custom upload still works.
 
 - Zoom, free-look and the local skin changer (Windows PC, real build): `scripts\release.ps1`
   (cargo fmt/clippy/test, Gradle build + JUnit against the real Forge 1.8.9 classes, release

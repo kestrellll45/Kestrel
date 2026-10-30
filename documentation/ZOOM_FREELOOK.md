@@ -21,10 +21,10 @@ Settings (in-game menu, Right Shift → General → *Zoom & free look*):
 |---|---|---|
 | Zoom strength | 4.0x | 1.5x - 10x (FOV divided by this) |
 | Smooth zoom | on | off = instant |
-| Zoom speed | 14 | 2 - 40 (higher = faster) |
+| Zoom speed | 14 | 2 - 40 (higher = faster; 14 is about 0.2 s, transition time = 3 / speed s) |
 | Lower sensitivity while zoomed | off | scales mouse movement by the zoom |
 | Free look in third person | on | switch to third person while held, back to first person afterwards |
-| Smooth free-look return | on | ease back instead of returning instantly |
+| Smooth free-look return | on | ease back over 0.12 s instead of returning instantly |
 
 ## How it works
 
@@ -32,7 +32,11 @@ Settings (in-game menu, Right Shift → General → *Zoom & free look*):
 already makes Kestrel's FOV static (`MixinEntityRenderer` → `StaticFov.fov(…, zoom)`). The
 FOV setting is never written, so zoom can't stack, can't persist after release, and changing
 the FOV slider while zoomed applies immediately. The held item and the debug camera are not
-zoomed. The animation is exponential and frame-rate independent (`camera/ZoomState`).
+zoomed. Each press or release starts a timed transition from the current zoom, eased in and
+out (smootherstep) and interpolated in log space, so the view magnifies at an even rate at
+any FOV setting and zoom strength. Releasing mid-zoom reverses from where it is, without a jump.
+It is frame-rate independent; a long frame (world load) continues the animation instead of
+jumping to its end (`camera/ZoomState`).
 
 **Free-look** gives the camera its own yaw and pitch (`camera/FreeLookState`):
 
@@ -50,9 +54,12 @@ zoomed. The animation is exponential and frame-rate independent (`camera/ZoomSta
   chunks missing).
 - The crosshair is hidden while free-looking, because it would not show where you are
   aiming. Attacking and using items still go where your body faces.
-- Release eases the camera back to where you are facing, the shortest way round, then
-  switches back to first person if Kestrel switched you to third person (it leaves the
-  perspective alone if you pressed F5 meanwhile).
+- Release returns the camera on the same frame. It eases back to where you are facing, the
+  shortest way round, in at most 0.12 s whatever the angle, fastest at the start (ease-out),
+  and ends exactly on your rotation; mouse movement turns your player again immediately. If
+  Kestrel switched you to third person for free-look, it switches straight back to first person
+  on release (that is already a cut, so there is no animation to wait for); it leaves the
+  perspective alone if you pressed F5 meanwhile.
 
 All hooks fall through to vanilla when the features are not in use. Each of these injectors
 is declared with `require`, so a broken hook stops the game at start-up instead of silently

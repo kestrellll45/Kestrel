@@ -235,6 +235,138 @@ pub fn sky_catalog() -> &'static [SkyEntry] {
     })
 }
 
+// ---- historical Mojang capes ---------------------------------------------------
+
+/// Names and Mojang texture ids of the historical Mojang capes, shared with
+/// the mod. The original textures are fetched from Mojang's texture server
+/// on first use and cached in [`mojang_capes_dir`]; nothing of Mojang's
+/// artwork ships with Kestrel. They are local cosmetics only.
+pub const MOJANG_CAPES_JSON: &str =
+    include_str!("../../../../client/src/main/resources/assets/kestrel/mojang_capes.json");
+/// Selection id prefix (`mojang:minecon_2011`). Must match `MojangCapes.PREFIX`.
+pub const MOJANG_PREFIX: &str = "mojang:";
+/// Menu category of the Mojang capes.
+pub const MOJANG_CATEGORY: (&str, &str) = ("mojang", "Mojang");
+/// Mojang cape textures are 64x32 PNGs of a few KB.
+pub const MAX_MOJANG_CAPE_BYTES: u64 = 64 * 1024;
+
+/// Fetches `url` with a byte limit (in the launcher: [`crate::skins::http_fetch`]).
+pub type Fetcher<'a> = &'a dyn Fn(&str, u64) -> std::result::Result<Vec<u8>, String>;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MojangCape {
+    pub id: String,
+    pub name: String,
+    pub texture_id: String,
+    #[serde(default)]
+    pub about: String,
+}
+
+impl MojangCape {
+    pub fn selection_id(&self) -> String {
+        format!("{MOJANG_PREFIX}{}", self.id)
+    }
+
+    pub fn url(&self) -> String {
+        format!("https://textures.minecraft.net/texture/{}", self.texture_id)
+    }
+
+    pub fn file_name(&self) -> String {
+        format!("{}.png", self.texture_id)
+    }
+}
+
+#[derive(Deserialize)]
+struct MojangCapesFile {
+    capes: Vec<MojangCape>,
+}
+
+fn is_texture_id(s: &str) -> bool {
+    (32..=64).contains(&s.len()) && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Parse and check the Mojang cape list (same rules as `MojangCapes.parse`).
+pub fn parse_mojang_capes(json: &str) -> std::result::Result<Vec<MojangCape>, String> {
+    let file: MojangCapesFile =
+        serde_json::from_str(json).map_err(|e| format!("mojang_capes.json: {e}"))?;
+    let mut ids = std::collections::HashSet::new();
+    let mut textures = std::collections::HashSet::new();
+    for c in &file.capes {
+        if c.id.is_empty()
+            || c.id.len() > 32
+            || !c
+                .id
+                .bytes()
+                .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_'))
+        {
+            return Err(format!("mojang_capes.json: invalid id {:?}", c.id));
+        }
+        if c.name.is_empty() {
+            return Err(format!("mojang_capes.json: {} has no name", c.id));
+        }
+        if !is_texture_id(&c.texture_id) {
+            return Err(format!(
+                "mojang_capes.json: {} has an invalid textureId",
+                c.id
+            ));
+        }
+        if !ids.insert(c.id.clone()) || !textures.insert(c.texture_id.clone()) {
+            return Err(format!("mojang_capes.json: duplicate entry {}", c.id));
+        }
+    }
+    Ok(file.capes)
+}
+
+pub fn mojang_capes() -> &'static [MojangCape] {
+    static LIST: std::sync::OnceLock<Vec<MojangCape>> = std::sync::OnceLock::new();
+    LIST.get_or_init(|| {
+        parse_mojang_capes(MOJANG_CAPES_JSON).unwrap_or_else(|e| {
+            log::error!("{e}");
+            Vec::new()
+        })
+    })
+}
+
+pub fn mojang_cape(selection: &str) -> Option<&'static MojangCape> {
+    let id = selection.strip_prefix(MOJANG_PREFIX)?;
+    mojang_capes().iter().find(|c| c.id == id)
+}
+
+/// Where downloaded Mojang cape textures are cached (shared with the mod).
+pub fn mojang_capes_dir(layout: &Layout) -> PathBuf {
+    layout.client_data().join("mojang-capes")
+}
+
+/// The cached original texture of a Mojang cape, downloaded with `fetch`
+/// first if it is not cached yet. `fetch` is [`crate::skins::http_fetch`] in
+/// the launcher (HTTPS, Mojang hosts only); the bytes must be a valid cape
+/// image before they are kept.
+pub fn fetch_mojang_cape(
+    layout: &Layout,
+    cape: &MojangCape,
+    fetch: Fetcher<'_>,
+) -> std::result::Result<PathBuf, String> {
+    if !is_texture_id(&cape.texture_id) {
+        return Err("invalid texture id".into());
+    }
+    let path = mojang_capes_dir(layout).join(cape.file_name());
+    if std::fs::metadata(&path)
+        .map(|m| m.len() > 0)
+        .unwrap_or(false)
+    {
+        return Ok(path);
+    }
+    let bytes = fetch(&cape.url(), MAX_MOJANG_CAPE_BYTES)?;
+    if is_gif(&bytes) {
+        return Err("Mojang returned an unexpected image type".into());
+    }
+    validate_image(Kind::Cape, &bytes)
+        .map_err(|e| format!("Mojang returned an invalid cape: {e}"))?;
+    atomic_write(&path, &bytes).map_err(|e| format!("cannot save {}: {e}", path.display()))?;
+    Ok(path)
+}
+
 /// The bundled cape catalog. A broken catalog (caught by tests) yields an
 /// empty list rather than a crash.
 pub fn cape_catalog() -> &'static [CapeEntry] {
@@ -1207,6 +1339,73 @@ mod tests {
             wr.write_image_data(&data).unwrap();
         }
         out
+    }
+
+    #[test]
+    fn mojang_capes_list_matches_the_mod_and_request() {
+        let ids: Vec<&str> = mojang_capes().iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "minecon_2011",
+                "minecon_2012",
+                "minecon_2013",
+                "minecon_2015",
+                "minecon_2016",
+                "realms_mapmaker",
+                "crafter",
+                "translator",
+                "mojang_classic",
+                "mojang",
+                "cobalt",
+                "mojira_moderator"
+            ]
+        );
+        let java =
+            include_str!("../../../../client/src/main/java/com/kestrel/cosmetics/MojangCapes.java");
+        assert!(java.contains(&format!("PREFIX = \"{MOJANG_PREFIX}\"")));
+        let m = mojang_cape("mojang:cobalt").unwrap();
+        assert_eq!(m.texture_id.len(), 63, "Mojang drops leading zeros");
+        assert!(
+            m.url()
+                .starts_with("https://textures.minecraft.net/texture/")
+        );
+        assert!(mojang_cape("cobalt").is_none());
+        assert!(mojang_cape("mojang:nope").is_none());
+        assert!(
+            parse_mojang_capes(r#"{"capes":[{"id":"a","name":"A","textureId":"../x"}]}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn mojang_cape_is_fetched_once_validated_and_cached() {
+        let (_d, l) = layout();
+        let cape = &mojang_capes()[0];
+        let calls = std::cell::Cell::new(0);
+        let good = |url: &str, limit: u64| {
+            calls.set(calls.get() + 1);
+            assert_eq!(url, cape.url());
+            assert_eq!(limit, MAX_MOJANG_CAPE_BYTES);
+            Ok(png_bytes(64, 32))
+        };
+        let p = fetch_mojang_cape(&l, cape, &good).unwrap();
+        assert_eq!(p, mojang_capes_dir(&l).join(cape.file_name()));
+        assert!(p.is_file());
+        fetch_mojang_cape(&l, cape, &good).unwrap();
+        assert_eq!(calls.get(), 1, "second call uses the cache");
+
+        let other = &mojang_capes()[1];
+        let bad = |_: &str, _: u64| Ok(png_bytes(30, 30));
+        assert!(fetch_mojang_cape(&l, other, &bad).is_err());
+        assert!(
+            !mojang_capes_dir(&l).join(other.file_name()).exists(),
+            "invalid data is not kept"
+        );
+        let offline = |_: &str, _: u64| Err("offline".to_string());
+        assert_eq!(
+            fetch_mojang_cape(&l, other, &offline).unwrap_err(),
+            "offline"
+        );
     }
 
     fn layout() -> (tempfile::TempDir, Layout) {
