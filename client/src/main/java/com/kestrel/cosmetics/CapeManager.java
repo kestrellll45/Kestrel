@@ -20,7 +20,14 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -58,6 +65,10 @@ public final class CapeManager {
     private static final int CUSTOM_GIF_SCALE = 8;
     private static final String CATALOG_PATH = "/assets/kestrel/capes.json";
     private static final String TEXTURE_ROOT = "/assets/kestrel/textures/";
+    private static final String MOJANG_CATALOG_PATH = "/assets/kestrel/mojang_capes.json";
+    /** Mojang cape textures are 64x32 PNGs of a few KB; anything bigger is refused. */
+    static final int MAX_MOJANG_BYTES = 64 * 1024;
+    private static final int MOJANG_TIMEOUT_MS = 8000;
 
     public static final class Option {
         public final String id;
@@ -65,15 +76,23 @@ public final class CapeManager {
         /** "none", "custom", or a catalog category ({@link CapeCatalog#CATEGORIES}). */
         public final String category;
         public final boolean animated;
-        /** Catalog entry, null for "none" and custom files. */
+        /** Catalog entry, null for "none", custom files and Mojang capes. */
         public final CapeCatalog.Entry entry;
+        /** Historical Mojang cape, or null. */
+        public final MojangCapes.Entry mojang;
 
         Option(String id, String name, String category, boolean animated, CapeCatalog.Entry entry) {
+            this(id, name, category, animated, entry, null);
+        }
+
+        Option(String id, String name, String category, boolean animated, CapeCatalog.Entry entry,
+               MojangCapes.Entry mojang) {
             this.id = id;
             this.name = name;
             this.category = category;
             this.animated = animated;
             this.entry = entry;
+            this.mojang = mojang;
         }
     }
 
@@ -109,6 +128,9 @@ public final class CapeManager {
     private final KestrelClient client;
     private final File customDir;
     private final CapeCatalog catalog;
+    private final MojangCapes mojang;
+    /** Cache of downloaded Mojang cape textures (shared with the launcher). */
+    private final File mojangDir;
     private final Map<String, Loaded> cache = new HashMap<String, Loaded>();
     private volatile List<String> customFiles = Collections.emptyList();
     private String localUuid;
@@ -122,6 +144,24 @@ public final class CapeManager {
             KestrelMod.LOG.warn("[Kestrel] cannot create {}", customDir);
         }
         this.catalog = loadCatalog();
+        this.mojang = loadMojangCapes();
+        this.mojangDir = new File(customDir.getParentFile(), "mojang-capes");
+    }
+
+    private static MojangCapes loadMojangCapes() {
+        try {
+            byte[] json = readBundled(MOJANG_CATALOG_PATH, 64 * 1024);
+            MojangCapes m = MojangCapes.parse(new String(json, StandardCharsets.UTF_8));
+            KestrelMod.LOG.info("[Kestrel] Mojang cape list: {} cape(s)", m.entries().size());
+            return m;
+        } catch (Exception e) {
+            KestrelMod.LOG.error("[Kestrel] cannot load Mojang cape list: {}", e.toString());
+            return MojangCapes.empty();
+        }
+    }
+
+    public MojangCapes mojangCapes() {
+        return mojang;
     }
 
     private static CapeCatalog loadCatalog() {
@@ -152,6 +192,9 @@ public final class CapeManager {
         String me = localUuid();
         for (CapeCatalog.Entry e : catalog.entries()) {
             if (e.allows(me)) out.add(new Option(e.id, e.name, e.category, e.animated(), e));
+        }
+        for (MojangCapes.Entry m : mojang.entries()) {
+            out.add(new Option(m.selectionId(), m.name, MojangCapes.CATEGORY, false, null, m));
         }
         for (String f : customFiles) {
             out.add(new Option(CUSTOM_PREFIX + f, f, "custom", f.toLowerCase(Locale.ROOT).endsWith(".gif"), null));
@@ -263,6 +306,11 @@ public final class CapeManager {
         restrictionError = null;
         if (!c.capesEnabled || NONE.equals(c.cape)) return null;
         if (c.cape.startsWith(CUSTOM_PREFIX)) return c.cape;
+        if (c.cape.startsWith(MojangCapes.PREFIX)) {
+            if (mojang.bySelection(c.cape) != null) return c.cape;
+            restrictionError = "unknown cape " + c.cape;
+            return null;
+        }
         CapeCatalog.Entry e = catalog.get(c.cape);
         if (e == null) {
             restrictionError = "unknown cape " + c.cape;
@@ -273,6 +321,22 @@ public final class CapeManager {
             return null;
         }
         return e.id;
+    }
+
+    /**
+     * Texture for a menu preview of a Mojang cape (downloads it on first use).
+     * Kept like a cape seen on another player, so it is freed once the menu
+     * has not shown it for a while. Null until it is ready.
+     */
+    public ResourceLocation previewTexture(String id) {
+        if (id == null || mojang.bySelection(id) == null) return null;
+        return frame(id, true);
+    }
+
+    /** Why a Mojang cape preview is unavailable, or null. */
+    public String previewError(String id) {
+        Loaded l = cache.get(id);
+        return l == null ? null : l.error;
     }
 
     private ResourceLocation frame(String id, boolean otherPlayer) {
@@ -317,6 +381,18 @@ public final class CapeManager {
                 @Override
                 public Decoded call() throws Exception {
                     return name(file).endsWith(".gif") ? decodeCustomGif(file) : decodeCustomPng(file);
+                }
+            };
+        } else if (id.startsWith(MojangCapes.PREFIX)) {
+            final MojangCapes.Entry m = mojang.bySelection(id);
+            if (m == null) {
+                entry.error = "unknown cape " + id;
+                return entry;
+            }
+            task = new Callable<Decoded>() {
+                @Override
+                public Decoded call() throws Exception {
+                    return decodeCustomPng(mojangFile(mojangDir, m));
                 }
             };
         } else {
@@ -382,6 +458,75 @@ public final class CapeManager {
             Decoded still = decodePngStrip(readBundled(TEXTURE_ROOT + e.fallback, MAX_FILE_BYTES), e.name);
             return new Decoded(new BufferedImage[]{still.frames[0]}, FrameTimeline.fixed(1),
                     "animation unavailable (" + gifError.getMessage() + "); using the static cape");
+        }
+    }
+
+    /**
+     * The cached original texture of a Mojang cape, downloaded from Mojang's
+     * texture server first if needed (loader thread). Only that host is
+     * contacted, redirects are refused, and the file must be a valid cape PNG
+     * before it is kept.
+     */
+    static File mojangFile(File dir, MojangCapes.Entry m) throws IOException {
+        File file = new File(dir, m.fileName());
+        if (file.isFile() && file.length() > 0) return file;
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("cannot create " + dir);
+        byte[] data;
+        try {
+            data = download(m.httpsUrl());
+        } catch (IOException httpsError) {
+            // Java 8u51 (the game's runtime) may not trust the current HTTPS
+            // certificate chain. Vanilla 1.8.9 loads every cape over plain
+            // HTTP from this host; the file is validated below either way.
+            KestrelMod.LOG.info("[Kestrel] Mojang cape {} over HTTPS failed ({}); trying HTTP", m.id, httpsError.toString());
+            data = download(m.httpUrl());
+        }
+        File tmp = new File(dir, m.fileName() + ".part");
+        OutputStream out = new FileOutputStream(tmp);
+        try {
+            out.write(data);
+        } finally {
+            out.close();
+        }
+        try {
+            ImageValidation.Dimensions d = ImageValidation.readPngHeader(tmp, MAX_MOJANG_BYTES);
+            ImageValidation.validateCape(d);
+        } catch (ImageValidation.InvalidImageException ex) {
+            tmp.delete();
+            throw new IOException("Mojang returned an invalid cape image: " + ex.getMessage());
+        }
+        Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        KestrelMod.LOG.info("[Kestrel] downloaded Mojang cape {} ({} bytes)", m.id, data.length);
+        return file;
+    }
+
+    private static byte[] download(String url) throws IOException {
+        URL u = new URL(url);
+        if (!MojangCapes.HOST.equals(u.getHost())) throw new IOException("refusing to contact " + u.getHost());
+        HttpURLConnection c = (HttpURLConnection) u.openConnection();
+        c.setInstanceFollowRedirects(false);
+        c.setConnectTimeout(MOJANG_TIMEOUT_MS);
+        c.setReadTimeout(MOJANG_TIMEOUT_MS);
+        c.setUseCaches(false);
+        c.setRequestProperty("User-Agent", "Kestrel");
+        try {
+            int code = c.getResponseCode();
+            if (code != 200) throw new IOException("HTTP " + code + " from " + MojangCapes.HOST);
+            InputStream in = c.getInputStream();
+            try {
+                ByteArrayOutputStream buf = new ByteArrayOutputStream(8192);
+                byte[] chunk = new byte[8192];
+                int n;
+                while ((n = in.read(chunk)) > 0) {
+                    if (buf.size() + n > MAX_MOJANG_BYTES) throw new IOException("cape download is too large");
+                    buf.write(chunk, 0, n);
+                }
+                return buf.toByteArray();
+            } finally {
+                in.close();
+            }
+        } finally {
+            c.disconnect();
         }
     }
 
