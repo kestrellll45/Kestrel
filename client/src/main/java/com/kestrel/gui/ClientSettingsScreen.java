@@ -11,11 +11,13 @@ import com.kestrel.gui.widgets.ColorChoice;
 import com.kestrel.gui.widgets.Header;
 import com.kestrel.gui.widgets.Preview;
 import com.kestrel.gui.widgets.Slider;
+import com.kestrel.gui.widgets.TileGrid;
 import com.kestrel.gui.widgets.Toggle;
 import com.kestrel.gui.widgets.Widget;
 import com.kestrel.hud.CrosshairRenderer;
 import com.kestrel.hud.HudElement;
 import com.kestrel.performance.FrameStats;
+import com.kestrel.rendering.SkyCatalog;
 import com.kestrel.rendering.SkyManager;
 import com.kestrel.util.RenderUtil;
 import net.minecraft.client.Minecraft;
@@ -28,7 +30,9 @@ import org.lwjgl.opengl.GL11;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * In-game settings (Right Shift by default). Every control is bound to a
@@ -47,6 +51,12 @@ public final class ClientSettingsScreen extends GuiScreen {
     }
 
     private static Category lastCategory = Category.GENERAL;
+    private static final TileGrid.Filter CAPE_FILTER = new TileGrid.Filter();
+    private static final TileGrid.Filter SKY_FILTER = new TileGrid.Filter();
+    private static final TileGrid.Filter EFFECT_FILTER = new TileGrid.Filter();
+    private static final String VANILLA_SKY = "__vanilla";
+    /** Texture size of each thumbnail (queried once from GL). */
+    private static final Map<ResourceLocation, int[]> THUMB_SIZES = new HashMap<ResourceLocation, int[]>();
 
     private final KestrelClient client;
     private final List<Widget> content = new ArrayList<Widget>();
@@ -233,16 +243,19 @@ public final class ClientSettingsScreen extends GuiScreen {
                     co.capesEnabled = v;
                     changed();
                 }));
-                List<String> ids = new ArrayList<String>();
-                List<String> names = new ArrayList<String>();
+                header("Capes");
+                final Map<String, CapeManager.Option> capeOpts = new HashMap<String, CapeManager.Option>();
+                List<TileGrid.Item> capeItems = new ArrayList<TileGrid.Item>();
                 for (CapeManager.Option o : client.capes().options()) {
-                    ids.add(o.id);
-                    names.add(o.name);
+                    capeOpts.put(o.id, o);
+                    capeItems.add(new TileGrid.Item(o.id, o.name, o.category, o.animated ? "ANIM" : null));
                 }
-                content.add(new Choice("Cape", ids, names, () -> co.cape, v -> {
+                content.add(new TileGrid(capeItems, list2("static", "Static", "animated", "Animated", "special", "Special",
+                        "kestrel", "Kestrel", "custom", "Custom"), () -> co.cape, v -> {
                     co.cape = v;
+                    if (!CapeManager.NONE.equals(v)) co.capesEnabled = true;
                     changed();
-                }));
+                }, (mc2, it, x, y, w, h) -> drawCapeThumb(mc2, capeOpts.get(it.id), x, y, w, h), CAPE_FILTER, 40, 64));
                 content.add(new Toggle("Animate capes", () -> co.animatedCapes, v -> {
                     co.animatedCapes = v;
                     changed();
@@ -266,16 +279,25 @@ public final class ClientSettingsScreen extends GuiScreen {
                     sk.enabled = v;
                     changed();
                 }));
-                List<String> sids = new ArrayList<String>();
-                List<String> snames = new ArrayList<String>();
+                final Map<String, SkyManager.Option> skyOpts = new HashMap<String, SkyManager.Option>();
+                List<TileGrid.Item> skyItems = new ArrayList<TileGrid.Item>();
+                skyItems.add(new TileGrid.Item(VANILLA_SKY, "Vanilla sky", "", null));
+                List<String[]> skyCats = new ArrayList<String[]>();
+                for (String cat : SkyCatalog.CATEGORIES) skyCats.add(new String[] {cat, SkyCatalog.categoryLabel(cat)});
+                skyCats.add(new String[] {"custom", "Custom"});
                 for (SkyManager.Option o : client.sky().options()) {
-                    sids.add(o.id);
-                    snames.add(o.name);
+                    skyOpts.put(o.id, o);
+                    skyItems.add(new TileGrid.Item(o.id, o.name, o.category, null));
                 }
-                content.add(new Choice("Sky", sids, snames, () -> sk.preset, v -> {
-                    sk.preset = v;
+                content.add(new TileGrid(skyItems, skyCats, () -> sk.enabled ? sk.preset : VANILLA_SKY, v -> {
+                    if (VANILLA_SKY.equals(v)) {
+                        sk.enabled = false;
+                    } else {
+                        sk.enabled = true;
+                        sk.preset = v;
+                    }
                     changed();
-                }));
+                }, (mc2, it, x, y, w, h) -> drawSkyThumb(mc2, skyOpts.get(it.id), it, x, y, w, h), SKY_FILTER, 96, 32));
                 content.add(floatSlider("Brightness", 0.1f, 1f, 0.05f, () -> sk.brightness, v -> sk.brightness = v, "%.2f"));
                 content.add(new Toggle("Slow rotation (animated)", () -> sk.rotate, v -> {
                     sk.rotate = v;
@@ -299,17 +321,22 @@ public final class ClientSettingsScreen extends GuiScreen {
                     ke.enabled = v;
                     changed();
                 }));
-                List<String> eids = new ArrayList<String>();
-                List<String> enames = new ArrayList<String>();
-                for (KillEffectType t : KillEffectType.values()) {
-                    eids.add(t.id);
-                    enames.add(t.label);
+                header("Effects");
+                List<TileGrid.Item> effectItems = new ArrayList<TileGrid.Item>();
+                List<String[]> effectCats = new ArrayList<String[]>();
+                for (KillEffectType.Category cat : KillEffectType.Category.values()) {
+                    effectCats.add(new String[] {cat.name(), cat.label});
                 }
-                content.add(new Choice("Effect", eids, enames, () -> ke.effect, v -> {
+                for (KillEffectType t : KillEffectType.values()) {
+                    effectItems.add(new TileGrid.Item(t.id, t.label, t.category.name(), t.usesColor ? "COLOR" : null));
+                }
+                content.add(new TileGrid(effectItems, effectCats, () -> ke.effect, v -> {
                     ke.effect = v;
                     changed();
-                }));
-                content.add(new ColorChoice("Effect colour (helix, colour burst)", () -> ke.color, v -> {
+                    client.killEffects().preview(KillEffectType.byId(v)); // plays in front of you when in a world
+                }, (mc2, it, x, y, w, h) -> drawEffectThumb(KillEffectType.byId(it.id), x, y, w, h), EFFECT_FILTER, 92, 16));
+                text("Click an effect to equip it; in a world it also plays in front of you.");
+                content.add(new ColorChoice("Effect colour (effects marked COLOR)", () -> ke.color, v -> {
                     ke.color = v;
                     changed();
                 }));
@@ -330,13 +357,10 @@ public final class ClientSettingsScreen extends GuiScreen {
                     ke.chatDetection = v;
                     changed();
                 }));
-                content.add(new Toggle("Include mobs", () -> ke.includeMobs, v -> {
-                    ke.includeMobs = v;
-                    changed();
-                }));
-                text("Kills are only detected for entities you hit in the last few seconds. Chat detection needs a kill message "
-                        + "that names both you and the victim; servers that word kills differently may not trigger effects. "
-                        + "Effects are visual only and visible to you only.");
+                text("Effects play only for players you kill yourself: never for other players' kills, mobs, fall/lava/void "
+                        + "deaths or your own death. Health detection credits you only when your hit was the last damage and "
+                        + "nobody else was attacking; chat detection needs a kill message that makes you the killer. "
+                        + "When it is unclear who got the kill, nothing plays. Effects are visual only and visible to you only.");
                 break;
             case PERFORMANCE:
                 final FrameStats fs = client.performance().frameStats();
@@ -424,6 +448,13 @@ public final class ClientSettingsScreen extends GuiScreen {
         return l;
     }
 
+    /** Pairs (id, label, id, label, ...) as category rows for a {@link TileGrid}. */
+    private static List<String[]> list2(String... s) {
+        List<String[]> l = new ArrayList<String[]>(s.length / 2);
+        for (int i = 0; i + 1 < s.length; i += 2) l.add(new String[] {s[i], s[i + 1]});
+        return l;
+    }
+
     private void header(String s) {
         content.add(new Header(s, true));
     }
@@ -439,6 +470,7 @@ public final class ClientSettingsScreen extends GuiScreen {
             w.x = contentX;
             w.w = innerW;
             if (w instanceof Header) ((Header) w).layout(mc, innerW);
+            if (w instanceof TileGrid) ((TileGrid) w).relayout(mc, innerW);
             w.y = contentY + yy - scroll;
             yy += w.h + 3;
         }
@@ -471,6 +503,103 @@ public final class ClientSettingsScreen extends GuiScreen {
         Gui.drawScaledCustomSizeModalRect(cx - w / 2, cy - h / 2, 1, 1, 10, 16, w, h, 64, 32);
         GlStateManager.disableBlend();
     }
+
+    /** Texture size in pixels (bound once, then cached). */
+    private int[] textureSize(Minecraft mc, ResourceLocation tex) {
+        int[] size = THUMB_SIZES.get(tex);
+        if (size == null) {
+            mc.getTextureManager().bindTexture(tex);
+            size = new int[] {
+                    Math.max(1, GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_WIDTH)),
+                    Math.max(1, GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT))};
+            THUMB_SIZES.put(tex, size);
+        }
+        return size;
+    }
+
+    private static void placeholder(Minecraft mc, String label, int x, int y, int w, int h) {
+        RenderUtil.rect(x, y, x + w, y + h, 0xFF16181D);
+        mc.fontRendererObj.drawString(label, x + (w - mc.fontRendererObj.getStringWidth(label)) / 2, y + (h - 8) / 2, Theme.MUTED, false);
+    }
+
+    /**
+     * Cape tile: the outer face from the catalog thumbnail (animated capes have
+     * their frames side by side and play at the cape's own rate). Custom capes
+     * show the live texture when equipped.
+     */
+    private void drawCapeThumb(Minecraft mc, CapeManager.Option o, int x, int y, int w, int h) {
+        int fw = h * 10 / 16; // one 10:16 face, centred
+        int fx = x + (w - fw) / 2;
+        if (o == null || o.entry == null) {
+            ResourceLocation live = o != null && o.id.equals(cfg().cosmetics.cape) ? client.capes().currentTexture() : null;
+            if (live == null) {
+                placeholder(mc, o == null || CapeManager.NONE.equals(o.id) ? "-" : "file", x, y, w, h);
+                return;
+            }
+            GlStateManager.color(1, 1, 1, 1);
+            GlStateManager.enableBlend();
+            mc.getTextureManager().bindTexture(live);
+            Gui.drawScaledCustomSizeModalRect(fx, y, 1, 1, 10, 16, fw, h, 64, 32);
+            GlStateManager.disableBlend();
+            return;
+        }
+        ResourceLocation tex = new ResourceLocation("kestrel", "textures/" + o.entry.thumbnail());
+        int[] size = textureSize(mc, tex);
+        int frameW = Math.max(1, size[1] * 10 / 16);
+        int frames = Math.max(1, size[0] / frameW);
+        int frame = 0;
+        if (frames > 1 && cfg().cosmetics.animatedCapes) {
+            int fps = o.entry.fps > 0 ? o.entry.fps : Math.max(1, cfg().cosmetics.animationFps);
+            frame = (int) ((System.currentTimeMillis() * fps / 1000L) % frames);
+        }
+        GlStateManager.color(1, 1, 1, 1);
+        GlStateManager.enableBlend();
+        mc.getTextureManager().bindTexture(tex);
+        Gui.drawScaledCustomSizeModalRect(fx, y, frame * frameW, 0, frameW, size[1], fw, h, size[0], size[1]);
+        GlStateManager.disableBlend();
+    }
+
+    /** Sky tile: the north/east/south strip from the catalog thumbnail. */
+    private void drawSkyThumb(Minecraft mc, SkyManager.Option o, TileGrid.Item it, int x, int y, int w, int h) {
+        if (VANILLA_SKY.equals(it.id)) {
+            RenderUtil.rect(x, y, x + w, y + h * 2 / 3, 0xFF79A6FF);
+            RenderUtil.rect(x, y + h * 2 / 3, x + w, y + h, 0xFF5C8A3C);
+            return;
+        }
+        if (o == null || o.thumbnail == null) {
+            placeholder(mc, "custom", x, y, w, h);
+            return;
+        }
+        ResourceLocation tex = new ResourceLocation("kestrel", "textures/" + o.thumbnail);
+        int[] size = textureSize(mc, tex);
+        GlStateManager.color(1, 1, 1, 1);
+        mc.getTextureManager().bindTexture(tex);
+        Gui.drawScaledCustomSizeModalRect(x, y, 0, 0, size[0], size[1], w, h, size[0], size[1]);
+    }
+
+    /** Effect tile: a small animated strip in the effect's colours. */
+    private void drawEffectThumb(KillEffectType t, int x, int y, int w, int h) {
+        RenderUtil.rect(x, y, x + w, y + h, 0xFF101114);
+        int base = t.usesColor ? (cfg().killEffects.color | 0xFF000000) : EFFECT_TINT[t.ordinal() % EFFECT_TINT.length];
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < 9; i++) {
+            // Deterministic per effect and dot; drifts outward from the centre on a loop.
+            int seed = t.ordinal() * 31 + i * 7;
+            float phase = ((now / 16 + seed * 37) % 100) / 100f;
+            float dir = (i % 2 == 0 ? 1 : -1) * (0.2f + (seed % 5) * 0.2f);
+            int dx = x + w / 2 + Math.round(dir * phase * (w / 2 - 3));
+            int dy = y + h / 2 + Math.round(((seed % 3) - 1) * phase * (h / 2 - 3));
+            int alpha = Math.round((1f - phase) * 255f);
+            RenderUtil.rect(dx - 1, dy - 1, dx + 1, dy + 1, (alpha << 24) | (base & 0xFFFFFF));
+        }
+    }
+
+    /** Preview tints for effects that do not use the colour setting (by ordinal, cycled). */
+    private static final int[] EFFECT_TINT = {
+            0xFFFFF0C8, 0xFFBE5AFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFC88C, 0xFF9A9A9A, 0xFF55FF55,
+            0xFFDCE6FF, 0xFFFF9628, 0xFF8CC8FF, 0xFFB4F0FF, 0xFFFF5A28, 0xFFC8C8C8,
+            0xFFC8B4FF, 0xFF7AF0E6, 0xFFB45AFF, 0xFF8C3CFF, 0xFFDC64FF, 0xFFFFFFFF,
+            0xFFFF5064, 0xFFFFFFFF, 0xFFFFDC3C, 0xFFFF7F00, 0xFFFFF5B4, 0xFFFF8C28};
 
     private void openFolder(java.io.File dir) {
         try {
@@ -560,6 +689,18 @@ public final class ClientSettingsScreen extends GuiScreen {
             scroll = Math.max(0, scroll);
             layout();
         }
+    }
+
+    @Override
+    protected void keyTyped(char typedChar, int keyCode) throws IOException {
+        for (Widget w : content) {
+            if (w instanceof TileGrid && ((TileGrid) w).isSearchFocused()) {
+                ((TileGrid) w).keyTyped(typedChar, keyCode);
+                layout(); // the grid's height changes with the filter
+                return;
+            }
+        }
+        super.keyTyped(typedChar, keyCode);
     }
 
     @Override

@@ -27,13 +27,18 @@ not through Minecraft's resource manager, so resource packs cannot change it.
   "crop": [0, 46, 231, 406],     // "faces": optional source crop x, y, w, h (e.g. letterbox bars)
   "fill": "#FF8298",             // "faces": colour around the picture
   "edge": "#C9576D",             // "faces": colour of the cape's 1-texel edges
-  "owners": ["<uuid>", "..."]    // optional: restrict to these Minecraft UUIDs
+  "owners": ["<uuid>", "..."],   // optional: restrict to these Minecraft UUIDs
+  "category": "animated",        // menu group: static (default), animated, special, kestrel
+  "fps": 12                      // optional, PNG strips only (1-60): the cape's own frame rate;
+                                 // without it the player's "Animation FPS" setting is used
 }
 ```
 
-3. Add a preview to `BUNDLED_CAPES` in `launcher/crates/kestrel-launcher/src/cosmetics_page.rs`
-   (the PNG, or the `fallback` PNG for a GIF). The test `every_catalog_cape_has_a_preview`
-   fails until you do.
+3. Add a thumbnail `textures/capes/thumbs/<id>.png`: the outer face (10:16; for animated
+   capes every frame's face side by side) and regenerate the launcher's embedded table
+   `launcher/crates/kestrel-launcher/src/bundled_previews.rs` (`write_preview_table()` in
+   `tools/gen_cosmetics.py`). The tests `every_catalog_entry_has_a_thumbnail` (Rust) and
+   `bundledCatalogHasCategorisedStaticAndAnimatedCapes` (Java) fail until you do.
 4. For a GIF with a `fallback`, regenerate the fallback from frame 0 (it must match exactly;
    `CapeCatalogTest.tetoFallbackMatchesTheFirstFrame` shows how: decode with `GifDecoder`,
    `CapeLayout.build(frame0, entry.layout)`, write PNG).
@@ -41,6 +46,17 @@ not through Minecraft's resource manager, so resource packs cannot change it.
 
 Existing ids never change meaning, so saved selections (`ClientConfig.cosmetics.cape`)
 keep working.
+
+## Bundled designs
+
+`tools/gen_cosmetics.py` generates the bundled capes from code (no external art): 24 static
+designs (Kestrel Classic/Gold/Stealth, gradients, neon, geometric, elemental, pixel-art,
+Galaxy, Obsidian Rune, Royal Crest, Carbon) at 4x (256x128) and 13 animated 24-frame
+strips at 2x (128x64 per frame) with their own frame rate (RGB Cycle/Wave, Plasma, Tidal
+Waves, Wildfire, Energy Core, Code Rain, Starfall, Pulse Rings, Kaleidoscope, Aurora Flow,
+Lava Lamp, Kestrel Pulse). It also writes every thumbnail and the catalog. Menus group capes
+by category (Static, Animated, Special, Kestrel, and Custom for your uploads), with a search
+box; animated capes are marked ANIMATED and their thumbnails play.
 
 ## Layouts
 

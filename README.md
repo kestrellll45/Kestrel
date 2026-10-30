@@ -20,7 +20,7 @@ launcher/   Rust workspace: kestrel-core (install/verify/auth/launch/update), ke
             kestrel-release (publisher signing tool, not shipped)
 client/     Forge 1.8.9 mod (Gradle, architectury-loom)
 scripts/    setup, build, test, release, setup-updates, bump-version, publish-release (.ps1)
-tools/      gen_assets.py (regenerates bundled cape/sky textures)
+tools/      gen_assets.py, gen_cosmetics.py (generate bundled cape/sky textures, thumbnails, catalogs)
 documentation/
 ```
 

@@ -160,7 +160,7 @@ angles (`EntityRenderer.orientCamera`, `Entity.setAngles`, `ActiveRenderInfo`,
 | Capes | `RenderPlayerEvent.Post`: your selected cape on you, catalog-assigned capes on their owners (UUID); replicates `RendererLivingEntity` transforms and vanilla `LayerCape` motion. PNG strips and GIFs (own compositing, per-frame timing), see CAPES.md |
 | Activity (Discord) | `ClientTickEvent`: logs `[Kestrel] activity <token>: menu/singleplayer/multiplayer` on change |
 | Skies | Forge `WorldProvider#setSkyRenderer` (Overworld only; uninstalled when disabled) |
-| Kill effects | `AttackEntityEvent` (who you hit) + `ClientTickEvent` (health ≤ 0) + `ClientChatReceivedEvent` (kill feed naming you and the victim) → `KillEffectManager` |
+| Kill effects | Players only. `AttackEntityEvent` (who you hit) + `ClientTickEvent` (victim's hurt events, health ≤ 0, other attackers nearby → `KillAttribution`) + `ClientChatReceivedEvent` (kill feed that makes you the killer → `KillMessageMatcher`) → `KillEffectManager`; see KILL_EFFECTS.md |
 | Frame stats | `RenderTickEvent` (ring buffer, avg + 1% low) |
 | Zoom / free-look | `RenderTickEvent(START)` reads the keys and advances `ZoomState`/`FreeLookState`; mixins read the per-frame values from `CameraHooks` (see ZOOM_FREELOOK.md) |
 | Local skin | `SkinManager` (`ClientTickEvent` polls `skins/skin.json`) + skin mixins; main-menu button via `GuiScreenEvent.InitGuiEvent`/`ActionPerformedEvent` (see SKINS.md) |
@@ -197,6 +197,14 @@ Verified in the development environment (Linux, no access to Mojang/Forge/Gradle
   Discord server incl. reconnect and clear-on-exit, activity parsing). New Java files were
   type-checked against stubs of the Minecraft/Forge APIs they use, not against real 1.8.9
   classes; the Windows named-pipe branch of `discord.rs` was not compiled.
+- Cosmetics expansion (0.6.0, Windows release build): Gradle build + 108 JUnit tests pass
+  (catalogs incl. every bundled thumbnail/atlas, kill attribution, kill-feed matching), Rust
+  fmt/clippy/tests pass, the jar contains all 43 capes and 29 skies with thumbnails, and all
+  kill-effect sound names exist in 1.8.9's sounds.json. In game (singleplayer + a second
+  client over LAN): category/search filters, animated cape thumbnails, cape on the player,
+  live sky switching, every new kill effect via preview; an own player kill played the effect
+  once ("<victim> was slain by <you>"), while a mob kill, your own death, a drowning and a
+  /kill 3 s after your hit played nothing. Not tested: a third player stealing the kill.
 
 - Zoom, free-look and the local skin changer (Windows PC, real build): `scripts\release.ps1`
   (cargo fmt/clippy/test, Gradle build + JUnit against the real Forge 1.8.9 classes, release

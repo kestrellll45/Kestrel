@@ -29,21 +29,25 @@ public final class SkyManager {
     public static final String CUSTOM_PREFIX = "custom:";
     static final long MAX_FILE_BYTES = 16L * 1024 * 1024;
 
-    private static final String[][] BUILTIN = {
-            {"dusk", "Dusk"},
-            {"starry", "Starry Night"},
-            {"nebula", "Nebula"},
-    };
+    private static final String CATALOG_PATH = "/assets/kestrel/skies.json";
 
     public static final class Option {
         public final String id;
         public final String name;
+        /** "custom" or a catalog category ({@link SkyCatalog#CATEGORIES}). */
+        public final String category;
+        /** Thumbnail path under textures/ (bundled skies), or null for custom skies. */
+        public final String thumbnail;
 
-        Option(String id, String name) {
+        Option(String id, String name, String category, String thumbnail) {
             this.id = id;
             this.name = name;
+            this.category = category;
+            this.thumbnail = thumbnail;
         }
     }
+
+    private final SkyCatalog catalog = loadCatalog();
 
     private final KestrelClient client;
     private final File customDir;
@@ -66,6 +70,28 @@ public final class SkyManager {
         }
     }
 
+    private static SkyCatalog loadCatalog() {
+        try {
+            java.io.InputStream in = SkyManager.class.getResourceAsStream(CATALOG_PATH);
+            if (in == null) throw new java.io.IOException("missing " + CATALOG_PATH);
+            try {
+                SkyCatalog c = SkyCatalog.parse(new String(org.apache.commons.io.IOUtils.toByteArray(in), java.nio.charset.StandardCharsets.UTF_8));
+                KestrelMod.LOG.info("[Kestrel] sky catalog: {} sky(ies)", c.entries().size());
+                return c;
+            } finally {
+                in.close();
+            }
+        } catch (Exception e) {
+            // A broken catalog must not break the game; only bundled skies are lost.
+            KestrelMod.LOG.error("[Kestrel] cannot load sky catalog: {}", e.toString());
+            return SkyCatalog.empty();
+        }
+    }
+
+    public SkyCatalog catalog() {
+        return catalog;
+    }
+
     ClientConfig.Sky config() {
         return client.config().sky;
     }
@@ -84,8 +110,8 @@ public final class SkyManager {
 
     public List<Option> options() {
         List<Option> out = new ArrayList<Option>();
-        for (String[] b : BUILTIN) out.add(new Option(b[0], b[1]));
-        for (String f : customFiles) out.add(new Option(CUSTOM_PREFIX + f, "Custom: " + f));
+        for (SkyCatalog.Entry e : catalog.entries()) out.add(new Option(e.id, e.name, e.category, e.thumbnail()));
+        for (String f : customFiles) out.add(new Option(CUSTOM_PREFIX + f, f, "custom", null));
         return out;
     }
 
@@ -130,8 +156,7 @@ public final class SkyManager {
     private void load(final String id) {
         lastError = null;
         if (!id.startsWith(CUSTOM_PREFIX)) {
-            boolean known = false;
-            for (String[] b : BUILTIN) known |= b[0].equals(id);
+            boolean known = catalog.get(id) != null;
             ResourceLocation loc = new ResourceLocation(KestrelMod.MODID, "textures/sky/" + id + ".png");
             if (!known || !TextureLoader.resourceExists(loc)) {
                 fail(id, "sky texture not found");

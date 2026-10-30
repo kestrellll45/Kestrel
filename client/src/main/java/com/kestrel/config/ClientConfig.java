@@ -137,12 +137,10 @@ public final class ClientConfig {
         public float volume = 0.7f;
         /** Colour used by the colour effects (helix, colour burst). Opaque ARGB. */
         public int color = 0xFFE8833A;
-        /** Detect kills from chat kill messages containing your name and the victim's. */
+        /** Credit kills from the server's death message when it makes you the killer (KillMessageMatcher). */
         public boolean chatDetection = true;
-        /** Detect kills when an entity you hit recently reaches 0 health. */
+        /** Credit kills when a player dies right after your hit with no other damage in between (KillAttribution). */
         public boolean healthDetection = true;
-        /** Also trigger on mobs, not only players. */
-        public boolean includeMobs = false;
 
         void validate() {
             if (effect == null || effect.isEmpty()) {

@@ -1,22 +1,290 @@
 {
-  "_comment": "Bundled capes. See documentation/CAPES.md. Texture paths are relative to assets/kestrel/textures/. 'owners' restricts a cape to exact player UUIDs (usernames are never used).",
+  "_comment": "Bundled capes. See documentation/CAPES.md. Texture paths are relative to assets/kestrel/textures/. 'owners' restricts a cape to exact player UUIDs (usernames are never used). 'category' groups capes in the menus (static, animated, special, kestrel); 'fps' sets the frame rate of an animated PNG strip (otherwise the player's animation setting is used).",
   "capes": [
-    {"id": "ember", "name": "Ember", "texture": "capes/ember.png"},
-    {"id": "glacier", "name": "Glacier", "texture": "capes/glacier.png"},
-    {"id": "midnight", "name": "Midnight", "texture": "capes/midnight.png"},
-    {"id": "verdant", "name": "Verdant", "texture": "capes/verdant.png"},
-    {"id": "aurora", "name": "Aurora (animated)", "texture": "capes/aurora.png"},
+    {
+      "id": "ember",
+      "name": "Ember",
+      "texture": "capes/ember.png",
+      "category": "static"
+    },
+    {
+      "id": "glacier",
+      "name": "Glacier",
+      "texture": "capes/glacier.png",
+      "category": "static"
+    },
+    {
+      "id": "midnight",
+      "name": "Midnight",
+      "texture": "capes/midnight.png",
+      "category": "static"
+    },
+    {
+      "id": "verdant",
+      "name": "Verdant",
+      "texture": "capes/verdant.png",
+      "category": "static"
+    },
+    {
+      "id": "aurora",
+      "name": "Aurora",
+      "texture": "capes/aurora.png",
+      "category": "animated"
+    },
     {
       "id": "teto",
-      "name": "Kasane Teto (animated)",
+      "name": "Kasane Teto",
       "texture": "capes/teto.gif",
       "fallback": "capes/teto.png",
       "layout": "faces",
       "scale": 8,
-      "crop": [0, 46, 231, 406],
+      "crop": [
+        0,
+        46,
+        231,
+        406
+      ],
       "fill": "#FF8298",
       "edge": "#C9576D",
-      "owners": ["ba14933e-a7ad-4816-8696-a788cc1b3c1f"]
+      "owners": [
+        "ba14933e-a7ad-4816-8696-a788cc1b3c1f"
+      ],
+      "category": "special"
+    },
+    {
+      "id": "kestrel_classic",
+      "name": "Kestrel Classic",
+      "texture": "capes/kestrel_classic.png",
+      "category": "kestrel"
+    },
+    {
+      "id": "kestrel_gold",
+      "name": "Kestrel Gold",
+      "texture": "capes/kestrel_gold.png",
+      "category": "kestrel"
+    },
+    {
+      "id": "kestrel_stealth",
+      "name": "Kestrel Stealth",
+      "texture": "capes/kestrel_stealth.png",
+      "category": "kestrel"
+    },
+    {
+      "id": "onyx",
+      "name": "Onyx",
+      "texture": "capes/onyx.png",
+      "category": "static"
+    },
+    {
+      "id": "ivory",
+      "name": "Ivory",
+      "texture": "capes/ivory.png",
+      "category": "static"
+    },
+    {
+      "id": "sunset_fade",
+      "name": "Sunset Fade",
+      "texture": "capes/sunset_fade.png",
+      "category": "static"
+    },
+    {
+      "id": "ocean_fade",
+      "name": "Ocean Fade",
+      "texture": "capes/ocean_fade.png",
+      "category": "static"
+    },
+    {
+      "id": "mint",
+      "name": "Mint",
+      "texture": "capes/mint.png",
+      "category": "static"
+    },
+    {
+      "id": "neon_grid",
+      "name": "Neon Grid",
+      "texture": "capes/neon_grid.png",
+      "category": "static"
+    },
+    {
+      "id": "neon_circuit",
+      "name": "Neon Circuit",
+      "texture": "capes/neon_circuit.png",
+      "category": "static"
+    },
+    {
+      "id": "rgb_bands",
+      "name": "RGB Bands",
+      "texture": "capes/rgb_bands.png",
+      "category": "static"
+    },
+    {
+      "id": "hexagon",
+      "name": "Hexagon",
+      "texture": "capes/hexagon.png",
+      "category": "static"
+    },
+    {
+      "id": "low_poly",
+      "name": "Low Poly",
+      "texture": "capes/low_poly.png",
+      "category": "static"
+    },
+    {
+      "id": "checker",
+      "name": "Monochrome Checker",
+      "texture": "capes/checker.png",
+      "category": "static"
+    },
+    {
+      "id": "inferno",
+      "name": "Inferno",
+      "texture": "capes/inferno.png",
+      "category": "static"
+    },
+    {
+      "id": "frost",
+      "name": "Frost",
+      "texture": "capes/frost.png",
+      "category": "static"
+    },
+    {
+      "id": "thunder",
+      "name": "Thunder",
+      "texture": "capes/thunder.png",
+      "category": "static"
+    },
+    {
+      "id": "grove",
+      "name": "Grove",
+      "texture": "capes/grove.png",
+      "category": "static"
+    },
+    {
+      "id": "pixel_blade",
+      "name": "Pixel Blade",
+      "texture": "capes/pixel_blade.png",
+      "category": "static"
+    },
+    {
+      "id": "pixel_moon",
+      "name": "Pixel Moon",
+      "texture": "capes/pixel_moon.png",
+      "category": "static"
+    },
+    {
+      "id": "galaxy",
+      "name": "Galaxy",
+      "texture": "capes/galaxy.png",
+      "category": "special"
+    },
+    {
+      "id": "obsidian_rune",
+      "name": "Obsidian Rune",
+      "texture": "capes/obsidian_rune.png",
+      "category": "special"
+    },
+    {
+      "id": "royal_crest",
+      "name": "Royal Crest",
+      "texture": "capes/royal_crest.png",
+      "category": "special"
+    },
+    {
+      "id": "carbon",
+      "name": "Carbon Fiber",
+      "texture": "capes/carbon.png",
+      "category": "static"
+    },
+    {
+      "id": "rgb_cycle",
+      "name": "RGB Cycle",
+      "texture": "capes/rgb_cycle.png",
+      "category": "animated",
+      "fps": 12
+    },
+    {
+      "id": "rgb_wave",
+      "name": "RGB Wave",
+      "texture": "capes/rgb_wave.png",
+      "category": "animated",
+      "fps": 15
+    },
+    {
+      "id": "plasma",
+      "name": "Plasma",
+      "texture": "capes/plasma.png",
+      "category": "animated",
+      "fps": 12
+    },
+    {
+      "id": "tidal",
+      "name": "Tidal Waves",
+      "texture": "capes/tidal.png",
+      "category": "animated",
+      "fps": 12
+    },
+    {
+      "id": "wildfire",
+      "name": "Wildfire",
+      "texture": "capes/wildfire.png",
+      "category": "animated",
+      "fps": 15
+    },
+    {
+      "id": "energy_core",
+      "name": "Energy Core",
+      "texture": "capes/energy_core.png",
+      "category": "animated",
+      "fps": 15
+    },
+    {
+      "id": "code_rain",
+      "name": "Code Rain",
+      "texture": "capes/code_rain.png",
+      "category": "animated",
+      "fps": 12
+    },
+    {
+      "id": "starfall",
+      "name": "Starfall",
+      "texture": "capes/starfall.png",
+      "category": "animated",
+      "fps": 12
+    },
+    {
+      "id": "pulse_rings",
+      "name": "Pulse Rings",
+      "texture": "capes/pulse_rings.png",
+      "category": "animated",
+      "fps": 15
+    },
+    {
+      "id": "kaleidoscope",
+      "name": "Kaleidoscope",
+      "texture": "capes/kaleidoscope.png",
+      "category": "animated",
+      "fps": 12
+    },
+    {
+      "id": "aurora_flow",
+      "name": "Aurora Flow",
+      "texture": "capes/aurora_flow.png",
+      "category": "animated",
+      "fps": 12
+    },
+    {
+      "id": "lava_lamp",
+      "name": "Lava Lamp",
+      "texture": "capes/lava_lamp.png",
+      "category": "special",
+      "fps": 12
+    },
+    {
+      "id": "kestrel_pulse",
+      "name": "Kestrel Pulse",
+      "texture": "capes/kestrel_pulse.png",
+      "category": "kestrel",
+      "fps": 15
     }
   ]
 }

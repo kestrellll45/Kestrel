@@ -77,9 +77,37 @@ pub struct CapeEntry {
     /// go through [`CapeEntry::allows`].
     #[serde(default)]
     owners: Option<Vec<String>>,
+    /// Menu category, one of [`CAPE_CATEGORIES`].
+    #[serde(default = "default_cape_category")]
+    pub category: String,
+    /// Frame rate of an animated PNG strip (`None`: the player's setting).
+    #[serde(default)]
+    pub fps: Option<u32>,
 }
 
+fn default_cape_category() -> String {
+    "static".into()
+}
+
+/// Cape menu categories (id, label), in display order. Must match `CapeCatalog.CATEGORIES`.
+pub const CAPE_CATEGORIES: &[(&str, &str)] = &[
+    ("static", "Static"),
+    ("animated", "Animated"),
+    ("special", "Special"),
+    ("kestrel", "Kestrel"),
+];
+
 impl CapeEntry {
+    /// Animated: a GIF, a strip with its own frame rate, or in the animated category.
+    pub fn animated(&self) -> bool {
+        self.texture.ends_with(".gif") || self.fps.is_some() || self.category == "animated"
+    }
+
+    /// Thumbnail path under `assets/kestrel/textures/`.
+    pub fn thumbnail(&self) -> String {
+        format!("capes/thumbs/{}.png", self.id)
+    }
+
     pub fn restricted(&self) -> bool {
         self.owners.is_some()
     }
@@ -123,8 +151,88 @@ pub fn parse_catalog(json: &str) -> std::result::Result<Vec<CapeEntry>, String> 
         {
             return Err(format!("capes.json: {}: invalid owner UUID '{bad}'", c.id));
         }
+        if !CAPE_CATEGORIES.iter().any(|(id, _)| *id == c.category) {
+            return Err(format!(
+                "capes.json: {}: unknown category '{}'",
+                c.id, c.category
+            ));
+        }
+        if let Some(fps) = c.fps
+            && (!(1..=60).contains(&fps) || c.texture.ends_with(".gif"))
+        {
+            return Err(format!("capes.json: {}: invalid fps {fps}", c.id));
+        }
     }
     Ok(file.capes)
+}
+
+/// The mod's sky catalog, compiled in so the launcher and mod agree.
+const SKY_CATALOG_JSON: &str =
+    include_str!("../../../../client/src/main/resources/assets/kestrel/skies.json");
+
+/// Sky menu categories (id, label), in display order. Must match `SkyCatalog.CATEGORIES`.
+pub const SKY_CATEGORIES: &[(&str, &str)] = &[
+    ("sunsets", "Sunsets"),
+    ("space", "Space"),
+    ("atmospheric", "Clouds & Aurora"),
+    ("dark", "Dark"),
+    ("neon", "Neon"),
+    ("fantasy", "Fantasy"),
+    ("minimal", "Minimal"),
+    ("blocky", "Blocky"),
+    ("kestrel", "Kestrel"),
+];
+
+/// A bundled sky from `skies.json` (atlas `sky/<id>.png`, thumbnail `sky/thumbs/<id>.png`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkyEntry {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+}
+
+#[derive(Deserialize)]
+struct SkyCatalogFile {
+    skies: Vec<SkyEntry>,
+}
+
+/// Parse and check a sky catalog (unique, well-formed ids; known categories).
+pub fn parse_sky_catalog(json: &str) -> std::result::Result<Vec<SkyEntry>, String> {
+    let file: SkyCatalogFile =
+        serde_json::from_str(json).map_err(|e| format!("skies.json: {e}"))?;
+    let mut seen = std::collections::HashSet::new();
+    for s in &file.skies {
+        let ok_id = !s.id.is_empty()
+            && s.id.len() <= 32
+            && s.id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        if !ok_id {
+            return Err(format!("skies.json: invalid id '{}'", s.id));
+        }
+        if !seen.insert(s.id.as_str()) {
+            return Err(format!("skies.json: duplicate id '{}'", s.id));
+        }
+        if !SKY_CATEGORIES.iter().any(|(id, _)| *id == s.category) {
+            return Err(format!(
+                "skies.json: {}: unknown category '{}'",
+                s.id, s.category
+            ));
+        }
+    }
+    Ok(file.skies)
+}
+
+/// The bundled sky catalog. A broken catalog (caught by tests) yields an
+/// empty list rather than a crash.
+pub fn sky_catalog() -> &'static [SkyEntry] {
+    static CATALOG: std::sync::OnceLock<Vec<SkyEntry>> = std::sync::OnceLock::new();
+    CATALOG.get_or_init(|| {
+        parse_sky_catalog(SKY_CATALOG_JSON).unwrap_or_else(|e| {
+            log::error!("{e}");
+            Vec::new()
+        })
+    })
 }
 
 /// The bundled cape catalog. A broken catalog (caught by tests) yields an
@@ -158,51 +266,218 @@ pub fn normalize_uuid(s: &str) -> Option<String> {
     Some(hex.to_ascii_lowercase())
 }
 
-/// Bundled skies (id, display name). Must match `SkyManager.BUILTIN`.
-pub const BUILTIN_SKIES: &[(&str, &str)] = &[
-    ("dusk", "Dusk"),
-    ("starry", "Starry Night"),
-    ("nebula", "Nebula"),
+/// A kill effect. Ids must match the mod's `KillEffectType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KillEffect {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub desc: &'static str,
+    pub category: &'static str,
+    /// Tinted by the colour setting.
+    pub uses_color: bool,
+}
+
+/// Kill effect categories (id, label), in display order. Must match `KillEffectType.Category`.
+pub const KILL_EFFECT_CATEGORIES: &[(&str, &str)] = &[
+    ("CLASSIC", "Classic"),
+    ("ELEMENTAL", "Elemental"),
+    ("MAGIC", "Magic"),
+    ("CELEBRATION", "Celebration"),
+    ("KESTREL", "Kestrel"),
 ];
 
-/// Kill effects (id, name, description). Must match `KillEffectType`.
-pub const KILL_EFFECTS: &[(&str, &str, &str)] = &[
-    (
+const fn fx(
+    id: &'static str,
+    name: &'static str,
+    category: &'static str,
+    uses_color: bool,
+    desc: &'static str,
+) -> KillEffect {
+    KillEffect {
+        id,
+        name,
+        desc,
+        category,
+        uses_color,
+    }
+}
+
+/// Kill effects, in the mod's order. Must match `KillEffectType`.
+pub const KILL_EFFECTS: &[KillEffect] = &[
+    fx(
         "burst",
         "Particle burst",
+        "CLASSIC",
+        false,
         "A quick burst of sparks and magic crits.",
     ),
-    (
+    fx(
         "ring",
         "Particle ring",
+        "CLASSIC",
+        false,
         "An expanding ring that rises around the victim.",
     ),
-    (
+    fx(
         "helix",
         "Colour helix",
+        "CLASSIC",
+        true,
         "Two coloured dust spirals climbing upward.",
     ),
-    (
+    fx(
         "dust",
         "Colour burst",
+        "CLASSIC",
+        true,
         "A sphere of dust in your chosen colour.",
     ),
-    (
+    fx(
         "explosion",
         "Explosion",
+        "CLASSIC",
+        false,
         "Large explosion puffs and smoke (visual only).",
     ),
-    (
+    fx(
+        "smoke",
+        "Smoke bomb",
+        "CLASSIC",
+        false,
+        "A rolling cloud of smoke spreading along the ground.",
+    ),
+    fx(
+        "pixel",
+        "Pixel blast",
+        "CLASSIC",
+        false,
+        "Coloured voxels fly out and bounce on the ground.",
+    ),
+    fx(
         "lightning",
         "Lightning",
+        "ELEMENTAL",
+        false,
         "A client-drawn lightning bolt with sparks.",
     ),
-    ("hearts", "Hearts", "A fountain of hearts."),
-    ("flames", "Flame pillar", "A spiralling column of flames."),
-    (
+    fx(
+        "flames",
+        "Flame pillar",
+        "ELEMENTAL",
+        false,
+        "A spiralling column of flames.",
+    ),
+    fx(
+        "shock",
+        "Electric shock",
+        "ELEMENTAL",
+        false,
+        "Flickering electric arcs crawl over the body.",
+    ),
+    fx(
+        "ice",
+        "Ice shatter",
+        "ELEMENTAL",
+        false,
+        "Ice shards burst outward with snow and breaking ice.",
+    ),
+    fx(
+        "nether",
+        "Nether blaze",
+        "ELEMENTAL",
+        false,
+        "Flames, lava drops and a burning ring on the ground.",
+    ),
+    fx(
+        "tornado",
+        "Tornado",
+        "ELEMENTAL",
+        false,
+        "A rising funnel of wind and dust.",
+    ),
+    fx(
         "arcane",
         "Arcane",
+        "MAGIC",
+        false,
         "Enchanting glyphs swirl into the victim.",
+    ),
+    fx(
+        "soul",
+        "Soul release",
+        "MAGIC",
+        false,
+        "Pale blue soul wisps spiral slowly upward.",
+    ),
+    fx(
+        "ender",
+        "Ender vanish",
+        "MAGIC",
+        false,
+        "Ender particles collapse inward with a purple flash.",
+    ),
+    fx(
+        "portal",
+        "Portal",
+        "MAGIC",
+        false,
+        "A swirling purple portal opens and collapses.",
+    ),
+    fx(
+        "dragon",
+        "Dragon breath",
+        "MAGIC",
+        false,
+        "Two purple wing arcs sweep upward.",
+    ),
+    fx(
+        "energy",
+        "Energy burst",
+        "MAGIC",
+        true,
+        "A glowing shockwave and beam in your colour.",
+    ),
+    fx(
+        "hearts",
+        "Hearts",
+        "CELEBRATION",
+        false,
+        "A fountain of hearts.",
+    ),
+    fx(
+        "fireworks",
+        "Fireworks",
+        "CELEBRATION",
+        true,
+        "Three rockets burst into coloured shells.",
+    ),
+    fx(
+        "confetti",
+        "Confetti",
+        "CELEBRATION",
+        false,
+        "Confetti bursts upward and flutters down.",
+    ),
+    fx(
+        "rainbow",
+        "Rainbow rings",
+        "CELEBRATION",
+        false,
+        "Stacked rainbow rings expand outward.",
+    ),
+    fx(
+        "starfall",
+        "Falling stars",
+        "CELEBRATION",
+        false,
+        "Shooting stars streak down and burst.",
+    ),
+    fx(
+        "kestrel",
+        "Kestrel strike",
+        "KESTREL",
+        false,
+        "Orange wings sweep open behind a glowing chevron.",
     ),
 ];
 
@@ -301,7 +576,7 @@ impl CosmeticSettings {
         }
         if !KILL_EFFECTS
             .iter()
-            .any(|(id, _, _)| *id == self.kill_effects.effect)
+            .any(|e| e.id == self.kill_effects.effect)
         {
             self.kill_effects.effect = "burst".into();
         }
@@ -1077,6 +1352,58 @@ mod tests {
         assert_eq!(p.pixels.len(), 384 * 128 * 4);
     }
 
+    /// The launcher's kill effects must be exactly the mod's `KillEffectType` ids, in order.
+    #[test]
+    fn kill_effects_match_the_mod() {
+        let java = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../client/src/main/java/com/kestrel/effects/KillEffectType.java"),
+        )
+        .unwrap();
+        // Effect constants come before the nested Category enum.
+        let effects_part = java.split("public enum Category").next().unwrap();
+        let ids: Vec<&str> = effects_part
+            .lines()
+            .filter_map(|l| {
+                let t = l.trim();
+                let rest = t.split_once("(\"")?.1;
+                t.chars().next().filter(|c| c.is_ascii_uppercase())?;
+                rest.split('"').next()
+            })
+            .collect();
+        let ours: Vec<&str> = KILL_EFFECTS.iter().map(|e| e.id).collect();
+        assert_eq!(ids, ours);
+        assert!(ours.len() >= 20);
+        for e in KILL_EFFECTS {
+            assert!(
+                KILL_EFFECT_CATEGORIES.iter().any(|(c, _)| *c == e.category),
+                "{}",
+                e.id
+            );
+        }
+    }
+
+    #[test]
+    fn catalogs_parse_and_reject_bad_entries() {
+        assert!(cape_catalog().len() >= 36);
+        assert!(cape_catalog().iter().filter(|c| c.animated()).count() >= 10);
+        let bad_cat =
+            r#"{"capes":[{"id":"a","name":"A","texture":"capes/a.png","category":"weird"}]}"#;
+        assert!(parse_catalog(bad_cat).is_err());
+        let bad_fps = r#"{"capes":[{"id":"a","name":"A","texture":"capes/a.gif","fps":10}]}"#;
+        assert!(parse_catalog(bad_fps).is_err());
+        let ok = r#"{"capes":[{"id":"a","name":"A","texture":"capes/a.png"}]}"#;
+        assert_eq!(parse_catalog(ok).unwrap()[0].category, "static");
+        assert!(
+            parse_sky_catalog(r#"{"skies":[{"id":"x","name":"X","category":"nope"}]}"#).is_err()
+        );
+        assert!(
+            parse_sky_catalog(r#"{"skies":[{"id":"../x","name":"X","category":"space"}]}"#)
+                .is_err()
+        );
+        assert!(parse_sky_catalog(r#"{"skies":[{"id":"x","name":"X","category":"space"},{"id":"x","name":"Y","category":"space"}]}"#).is_err());
+    }
+
     #[test]
     fn bundled_assets_pass_validation() {
         let base = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1090,9 +1417,28 @@ mod tests {
                 validate_image(Kind::Cape, &b).unwrap_or_else(|e| panic!("{}: {e}", c.id));
             }
         }
-        for (id, _) in BUILTIN_SKIES {
-            let b = std::fs::read(base.join(format!("sky/{id}.png"))).unwrap();
-            validate_image(Kind::Sky, &b).unwrap();
+        for c in cape_catalog() {
+            let b = std::fs::read(base.join(c.thumbnail()))
+                .unwrap_or_else(|e| panic!("{}: thumbnail: {e}", c.id));
+            let t = decode_png(&b).unwrap();
+            assert_eq!(t.height * 10 % 16, 0, "{}: thumbnail height", c.id);
+            let frame_w = t.height * 10 / 16;
+            assert_eq!(t.width % frame_w, 0, "{}: thumbnail frames", c.id);
+            assert_eq!(
+                t.width / frame_w > 1,
+                c.animated() && !c.texture.ends_with(".gif"),
+                "{}: frames vs animated",
+                c.id
+            );
+        }
+        assert!(sky_catalog().len() >= 25);
+        for s in sky_catalog() {
+            let b = std::fs::read(base.join(format!("sky/{}.png", s.id))).unwrap();
+            validate_image(Kind::Sky, &b).unwrap_or_else(|e| panic!("{}: {e}", s.id));
+            let t =
+                decode_png(&std::fs::read(base.join(format!("sky/thumbs/{}.png", s.id))).unwrap())
+                    .unwrap();
+            assert_eq!((t.width, t.height), (384, 128), "{}: thumbnail", s.id);
         }
     }
 
