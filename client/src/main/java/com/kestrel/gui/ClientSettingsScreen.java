@@ -330,10 +330,6 @@ public final class ClientSettingsScreen extends GuiScreen {
                     ke.chatDetection = v;
                     changed();
                 }));
-                content.add(new Toggle("Include mobs", () -> ke.includeMobs, v -> {
-                    ke.includeMobs = v;
-                    changed();
-                }));
                 text("Kills are only detected for entities you hit in the last few seconds. Chat detection needs a kill message "
                         + "that names both you and the victim; servers that word kills differently may not trigger effects. "
                         + "Effects are visual only and visible to you only.");

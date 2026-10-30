@@ -4,8 +4,9 @@ import com.kestrel.KestrelClient;
 import com.kestrel.config.ClientConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.projectile.EntityArrow;
+import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.world.World;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import net.minecraftforge.event.entity.player.AttackEntityEvent;
@@ -15,31 +16,41 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Detects kills by the local player. Separate from the effect layer so new
- * detection strategies (e.g. per-server message formats) can be added.
+ * Detects kills credited to the local player. Only <em>players</em> you
+ * attacked yourself are ever considered; mobs, your own death, other players'
+ * kills and deaths from falling, lava, fire or mobs never trigger an effect.
  *
- * <p>Two strategies, both requiring that <em>you</em> hit the victim recently
- * (we never fire because some nearby entity disappeared):
+ * <p>Two independent ways to confirm a kill, each strict on its own:
  * <ol>
- *   <li>Health: a recently-hit entity's synced health reaches 0 (works on
- *   servers that sync health and kill players normally, and singleplayer).</li>
- *   <li>Chat: a kill-feed line names both the recently-hit player and you
- *   (works on minigame servers that respawn players instead of killing them).</li>
+ *   <li>Death message: the server's kill-feed line names the victim and makes
+ *   you the killer ({@link KillMessageMatcher}). This is the server's own
+ *   attribution and works on minigame servers that respawn players instead of
+ *   killing them.</li>
+ *   <li>Death seen in the world: the victim's health reaches 0 and
+ *   {@link KillAttribution} attributes the killing blow to your hit (no other
+ *   damage in between, nobody else attacking).</li>
  * </ol>
- * Each victim triggers at most one effect per {@link #COOLDOWN_MS}.
+ * Whichever confirms first plays the effect, once per kill, at the victim's
+ * position; the other confirmation of the same kill is ignored.
  */
 public final class KillDetector {
-    static final long HEALTH_WINDOW_MS = 3000;
+    /** How long after your last hit a chat kill message may still credit you. */
     static final long CHAT_WINDOW_MS = 10000;
-    static final long COOLDOWN_MS = 3000;
+    /** After an effect, ignore further confirmations of the same victim for this long. */
+    static final long COOLDOWN_MS = 6000;
+    /** Other players this close to the victim count as possible attackers. */
+    private static final double FOREIGN_RADIUS = 6.0;
 
     private static final class Target {
         final int entityId;
         final String name;
-        long lastHitMs;
+        final KillAttribution attribution = new KillAttribution();
+        int lastHurtTime;
+        boolean fired;
         double x;
         double y;
         double z;
@@ -63,18 +74,17 @@ public final class KillDetector {
     @SubscribeEvent
     public void onAttack(AttackEntityEvent event) {
         Minecraft mc = Minecraft.getMinecraft();
-        if (event.entityPlayer != mc.thePlayer || !(event.target instanceof EntityLivingBase)) return;
-        ClientConfig.KillEffects cfg = client.config().killEffects;
-        if (!cfg.enabled) return;
-        boolean isPlayer = event.target instanceof EntityPlayer;
-        if (!isPlayer && !cfg.includeMobs) return;
-        Entity t = event.target;
+        if (mc.thePlayer == null || event.entityPlayer != mc.thePlayer) return;
+        if (!(event.target instanceof EntityPlayer) || event.target == mc.thePlayer) return; // players only
+        if (!client.config().killEffects.enabled) return;
+        EntityPlayer t = (EntityPlayer) event.target;
         Target tg = targets.get(t.getEntityId());
-        if (tg == null) {
-            tg = new Target(t.getEntityId(), isPlayer ? t.getName() : null);
+        if (tg == null || tg.fired) {
+            tg = new Target(t.getEntityId(), t.getName());
+            tg.lastHurtTime = t.hurtTime;
             targets.put(t.getEntityId(), tg);
         }
-        tg.lastHitMs = System.currentTimeMillis();
+        tg.attribution.ownHit(System.currentTimeMillis());
         tg.x = t.posX;
         tg.y = t.posY;
         tg.z = t.posZ;
@@ -83,26 +93,50 @@ public final class KillDetector {
     @SubscribeEvent
     public void onTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END || targets.isEmpty()) return;
-        World world = Minecraft.getMinecraft().theWorld;
+        Minecraft mc = Minecraft.getMinecraft();
+        World world = mc.theWorld;
         long now = System.currentTimeMillis();
         ClientConfig.KillEffects cfg = client.config().killEffects;
         Iterator<Target> it = targets.values().iterator();
         while (it.hasNext()) {
             Target tg = it.next();
-            if (now - tg.lastHitMs > CHAT_WINDOW_MS) {
+            if (now - tg.attribution.lastOwnHitMs() > CHAT_WINDOW_MS) {
                 it.remove();
                 continue;
             }
+            if (tg.fired) continue;
             Entity e = world == null ? null : world.getEntityByID(tg.entityId);
-            if (e instanceof EntityLivingBase) {
-                EntityLivingBase l = (EntityLivingBase) e;
-                tg.x = l.posX;
-                tg.y = l.posY;
-                tg.z = l.posZ;
-                if (cfg.healthDetection && now - tg.lastHitMs <= HEALTH_WINDOW_MS && l.getHealth() <= 0.0F) {
-                    fire(tg, now);
-                    it.remove();
-                }
+            if (!(e instanceof EntityPlayer)) continue;
+            EntityPlayer victim = (EntityPlayer) e;
+            tg.x = victim.posX;
+            tg.y = victim.posY;
+            tg.z = victim.posZ;
+            if (victim.hurtTime > tg.lastHurtTime) {
+                tg.attribution.hurt(now); // a new damage event (any cause) reached the client
+            }
+            tg.lastHurtTime = victim.hurtTime;
+            noteForeignAttackers(world, mc.thePlayer, victim, tg, now);
+            // Died but not attributable to you: only the server's death message
+            // (onChat) can still credit the kill.
+            if ((victim.getHealth() <= 0.0F || victim.isDead) && cfg.healthDetection
+                    && tg.attribution.creditedDeath(now)) {
+                fire(tg, now);
+            }
+        }
+    }
+
+    /** Other players swinging near the victim, or arrows not yours flying at it. */
+    private static void noteForeignAttackers(World world, EntityPlayer self, EntityPlayer victim, Target tg, long now) {
+        AxisAlignedBB box = victim.getEntityBoundingBox().expand(FOREIGN_RADIUS, 3.0, FOREIGN_RADIUS);
+        List<Entity> near = world.getEntitiesWithinAABBExcludingEntity(victim, box);
+        for (int i = 0; i < near.size(); i++) {
+            Entity n = near.get(i);
+            if (n == self) continue;
+            if (n instanceof EntityPlayer && ((EntityPlayer) n).isSwingInProgress) {
+                tg.attribution.foreignAttack(now);
+            } else if (n instanceof EntityArrow && ((EntityArrow) n).shootingEntity != self
+                    && n.getDistanceSqToEntity(victim) < 9.0) {
+                tg.attribution.foreignAttack(now);
             }
         }
     }
@@ -116,13 +150,10 @@ public final class KillDetector {
         String text = event.message.getUnformattedText();
         String self = mc.thePlayer.getName();
         long now = System.currentTimeMillis();
-        Iterator<Target> it = targets.values().iterator();
-        while (it.hasNext()) {
-            Target tg = it.next();
-            if (tg.name != null && now - tg.lastHitMs <= CHAT_WINDOW_MS
+        for (Target tg : targets.values()) {
+            if (!tg.fired && now - tg.attribution.lastOwnHitMs() <= CHAT_WINDOW_MS
                     && KillMessageMatcher.isKillMessage(text, self, tg.name)) {
                 fire(tg, now);
-                it.remove();
             }
         }
     }
@@ -136,10 +167,10 @@ public final class KillDetector {
     }
 
     private void fire(Target tg, long now) {
-        String key = tg.name != null ? tg.name : "#" + tg.entityId;
-        Long last = cooldowns.get(key);
+        tg.fired = true; // the other confirmation of this kill is ignored
+        Long last = cooldowns.get(tg.name);
         if (last != null && now - last < COOLDOWN_MS) return;
-        cooldowns.put(key, now);
+        cooldowns.put(tg.name, now);
         if (cooldowns.size() > 256) cooldowns.clear(); // bounded memory
         effects.trigger(tg.x, tg.y, tg.z);
     }
