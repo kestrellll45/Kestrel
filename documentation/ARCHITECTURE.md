@@ -198,6 +198,19 @@ Verified in the development environment (Linux, no access to Mojang/Forge/Gradle
   type-checked against stubs of the Minecraft/Forge APIs they use, not against real 1.8.9
   classes; the Windows named-pipe branch of `discord.rs` was not compiled.
 
+- Zoom, free-look and the local skin changer (Windows PC, real build): `scripts\release.ps1`
+  (cargo fmt/clippy/test, Gradle build + JUnit against the real Forge 1.8.9 classes, release
+  exe self-check) passed; every new mixin target is present in the built refmap with its SRG
+  name. In game, with the release exe and a scratch `--root`: hold-to-zoom in/out (hand not
+  zoomed, FOV setting unchanged), free-look (third-person orbit, body and view unchanged
+  after release, crosshair hidden, chunks behind you rendered), both at once, keyboard keys
+  not sticking, the Controls entries and the settings section; skin: NameMC profile link
+  (real Mojang API), import folder, the in-game file picker, apply/restore in game and in the
+  launcher, launcher→running game and game→launcher sync, custom skin on the player in
+  first/third person. Not exercised in game: death/respawn, dimension change, disconnect
+  and Alt-Tab while a key is held (covered by the reset logic and unit tests only), the tab
+  list head on a multiplayer server, and a Microsoft account's real skin in the previews.
+
 **Not yet verified** (needs a Windows machine with internet):
 
 - A real Gradle build of the mod (architectury-loom remapping) and a real game launch.

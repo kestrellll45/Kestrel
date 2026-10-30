@@ -313,7 +313,7 @@ impl SkinPage {
         ui.add_space(8.0);
 
         // Preview beside the actions on wide windows, above them on narrow ones.
-        if ui.available_width() >= 720.0 {
+        if ui.available_width() >= 860.0 {
             ui.horizontal_top(|ui| {
                 self.preview_ui(ui, &ctx, game_running);
                 ui.add_space(12.0);
@@ -507,7 +507,7 @@ impl SkinPage {
         ui.add_space(10.0);
         card(ui, |ui| {
             let selected_is_active = self.selected == self.state.active;
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let apply = ui.add_enabled(
                     !self.busy && self.selected.is_some() && !selected_is_active,
                     big_button("Apply Skin", true),
