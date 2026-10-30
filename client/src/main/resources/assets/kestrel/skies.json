@@ -1,0 +1,150 @@
+{
+  "_comment": "Bundled skies (3x2 atlases in textures/sky/<id>.png, thumbnails in textures/sky/thumbs/). See documentation/SKIES.md.",
+  "skies": [
+    {
+      "id": "dusk",
+      "name": "Dusk",
+      "category": "sunsets"
+    },
+    {
+      "id": "starry",
+      "name": "Starry Night",
+      "category": "space"
+    },
+    {
+      "id": "nebula",
+      "name": "Nebula",
+      "category": "space"
+    },
+    {
+      "id": "golden_hour",
+      "name": "Golden Hour",
+      "category": "sunsets"
+    },
+    {
+      "id": "pink_sunrise",
+      "name": "Pink Sunrise",
+      "category": "sunsets"
+    },
+    {
+      "id": "crimson_sunset",
+      "name": "Crimson Sunset",
+      "category": "sunsets"
+    },
+    {
+      "id": "desert_dusk",
+      "name": "Desert Dusk",
+      "category": "sunsets"
+    },
+    {
+      "id": "galaxy_core",
+      "name": "Galaxy Core",
+      "category": "space"
+    },
+    {
+      "id": "deep_space",
+      "name": "Deep Space",
+      "category": "space"
+    },
+    {
+      "id": "crimson_nebula",
+      "name": "Crimson Nebula",
+      "category": "space"
+    },
+    {
+      "id": "violet_nebula",
+      "name": "Violet Nebula",
+      "category": "space"
+    },
+    {
+      "id": "aurora_borealis",
+      "name": "Aurora Borealis",
+      "category": "atmospheric"
+    },
+    {
+      "id": "violet_aurora",
+      "name": "Violet Aurora",
+      "category": "atmospheric"
+    },
+    {
+      "id": "cumulus",
+      "name": "Cumulus Day",
+      "category": "atmospheric"
+    },
+    {
+      "id": "overcast",
+      "name": "Overcast",
+      "category": "atmospheric"
+    },
+    {
+      "id": "stormfront",
+      "name": "Stormfront",
+      "category": "dark"
+    },
+    {
+      "id": "blood_moon",
+      "name": "Blood Moon",
+      "category": "dark"
+    },
+    {
+      "id": "eclipse",
+      "name": "Eclipse",
+      "category": "dark"
+    },
+    {
+      "id": "synthwave",
+      "name": "Synthwave",
+      "category": "neon"
+    },
+    {
+      "id": "neon_dusk",
+      "name": "Neon Dusk",
+      "category": "neon"
+    },
+    {
+      "id": "frozen_twilight",
+      "name": "Frozen Twilight",
+      "category": "fantasy"
+    },
+    {
+      "id": "twin_moons",
+      "name": "Twin Moons",
+      "category": "fantasy"
+    },
+    {
+      "id": "cotton_candy",
+      "name": "Cotton Candy",
+      "category": "minimal"
+    },
+    {
+      "id": "azure",
+      "name": "Azure",
+      "category": "minimal"
+    },
+    {
+      "id": "monochrome",
+      "name": "Monochrome",
+      "category": "minimal"
+    },
+    {
+      "id": "void_realm",
+      "name": "Void Realm",
+      "category": "blocky"
+    },
+    {
+      "id": "ember_haze",
+      "name": "Ember Haze",
+      "category": "blocky"
+    },
+    {
+      "id": "blocky_noon",
+      "name": "Blocky Noon",
+      "category": "blocky"
+    },
+    {
+      "id": "kestrel_ember",
+      "name": "Kestrel Ember",
+      "category": "kestrel"
+    }
+  ]
+}
