@@ -293,7 +293,7 @@ final class MoreEffects {
                 // Portal particles drift back toward their spawn offset origin.
                 w.spawnParticle(EnumParticleTypes.PORTAL, x, y + 1, z, RNG.nextGaussian() * 1.6, RNG.nextGaussian() * 1.2, RNG.nextGaussian() * 1.6);
             }
-            if (step == 6) {
+            if (step == 14) {
                 int f = allowance((int) (16 * intensity));
                 for (int k = 0; k < f; k++) {
                     w.spawnParticle(EnumParticleTypes.REDSTONE, x + RNG.nextGaussian() * 0.4, y + 1 + RNG.nextGaussian() * 0.6,
@@ -311,16 +311,16 @@ final class MoreEffects {
             beginGlow(x - cx, y - cy, z - cz);
             Tessellator tess = Tessellator.getInstance();
             WorldRenderer wr = tess.getWorldRenderer();
-            double r = 1.4 * (1 - t) + 0.15;
+            double r = 1.6 * (1 - t) + 0.15;
             for (int s = 0; s < 4; s++) {
-                ring(wr, 0.3 + s * 0.45, r * 0.75, r, 24, 0.7f, 0.25f, 1.0f, 0f, a * 0.6f);
+                ring(wr, 0.3 + s * 0.45, r * 0.6, r, 24, 0.75f, 0.3f, 1.0f, a * 0.25f, a);
             }
             end();
         }
 
         @Override
         int lifetimeTicks() {
-            return 10;
+            return 20;
         }
     }
 
