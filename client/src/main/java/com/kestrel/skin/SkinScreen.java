@@ -118,15 +118,15 @@ public final class SkinScreen extends GuiScreen {
         add(new ActionButton("Open folder", false, this::openFolder), colX + third + 4, py + 40, third, 18);
         add(new ActionButton("Refresh", false, this::importFolder), colX + 2 * (third + 4), py + 40, colW - 2 * (third + 4), 18);
         String oldUrl = urlField != null ? urlField.getText() : "";
-        urlField = new GuiTextField(0, fontRendererObj, colX + 1, py + 63, colW - 68, 16);
+        urlField = new GuiTextField(0, fontRendererObj, colX + 1, py + 75, colW - 68, 16);
         urlField.setMaxStringLength(300);
         urlField.setText(oldUrl);
-        loadButton = add(new ActionButton("Load URL", false, this::loadUrl), colX + colW - 62, py + 62, 62, 18);
+        loadButton = add(new ActionButton("Load URL", false, this::loadUrl), colX + colW - 62, py + 74, 62, 18);
         int half = (colW - 4) / 2;
-        applyButton = add(new ActionButton("Apply Skin", true, this::apply), colX, py + 86, half, 18);
-        restoreButton = add(new ActionButton("Restore Account Skin", false, this::restore), colX + half + 4, py + 86, colW - half - 4, 18);
+        applyButton = add(new ActionButton("Apply Skin", true, this::apply), colX, py + 98, half, 18);
+        restoreButton = add(new ActionButton("Restore Account Skin", false, this::restore), colX + half + 4, py + 98, colW - half - 4, 18);
         add(new ActionButton("Done", false, () -> mc.displayGuiScreen(parent)), px + pw - 70, py + ph - 24, 60, 18);
-        listY = py + 110;
+        listY = py + 122;
         listH = py + ph - 30 - listY;
         requestAccountSkin();
     }
@@ -531,9 +531,9 @@ public final class SkinScreen extends GuiScreen {
         loadButton.enabled = !busy;
         importButton.enabled = !busy && !pickerOpen;
 
-        fontRendererObj.drawString("Load from NameMC (profile link)", colX, py + 54 - 1, Theme.MUTED, false);
+        fontRendererObj.drawString("Load from NameMC (profile link)", colX, py + 63, Theme.MUTED, false);
         if (urlField.getText().isEmpty() && !urlField.isFocused()) {
-            fontRendererObj.drawString("https://namemc.com/profile/<name>", colX + 5, py + 67, 0xFF6A7078, false);
+            fontRendererObj.drawString("https://namemc.com/profile/<name>", colX + 5, py + 79, 0xFF6A7078, false);
         }
         urlField.drawTextBox();
 
@@ -591,7 +591,8 @@ public final class SkinScreen extends GuiScreen {
         RenderHelper.enableStandardItemLighting();
         GlStateManager.rotate(-135.0F, 0.0F, 1.0F, 0.0F);
         GlStateManager.rotate(180.0F, 0.0F, 0.0F, 1.0F);
-        GlStateManager.rotate(yaw, 0.0F, 1.0F, 0.0F);
+        // Face the viewer at yaw 0 (checked in game: without this the back shows).
+        GlStateManager.rotate(180.0F + yaw, 0.0F, 1.0F, 0.0F);
         GlStateManager.translate(0.0F, -1.5F, 0.0F);
         GlStateManager.enableRescaleNormal();
         GlStateManager.disableCull();
