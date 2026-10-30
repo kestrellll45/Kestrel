@@ -7,22 +7,29 @@ package com.kestrel.camera;
  * <p>While the key is held, mouse movement turns these angles instead of the
  * player (same maths as {@code Entity.setAngles}). The player's own
  * rotation, and therefore movement and everything sent to the server, is
- * left exactly as it was. On release the camera eases back to wherever the
- * player is facing (shortest way round) instead of snapping.
+ * left exactly as it was.
+ *
+ * <p>On release the camera returns to wherever the player is facing (shortest
+ * way round). The return starts on the same frame and takes a fixed
+ * {@link #RETURN_DURATION} at most, whatever the angle, eased out so it moves
+ * fastest at the start and settles without a snap. It ends exactly on the
+ * player's rotation.
  */
 public final class FreeLookState {
-    static final float MAX_DT = 0.25f;
-    /** Angle (degrees) at which the return animation finishes. */
-    static final float DONE = 0.05f;
-    /** Speed of the return animation (exponential rate per second). */
-    public static final float RETURN_SPEED = 14.0f;
+    /** Longest frame time used for the return animation. */
+    static final float MAX_DT = 0.05f;
+    /** Duration of the smooth return, in seconds. */
+    public static final float RETURN_DURATION = 0.12f;
 
     private boolean held;
     private boolean returning;
     private float yaw;
     private float pitch;
+    private float fromYaw;
+    private float fromPitch;
+    private float progress;
 
-    /** Key pressed: start from the player's view (or continue a return). */
+    /** Key pressed: start from the player's view (or continue from a return). */
     public void press(float playerYaw, float playerPitch) {
         if (!held && !returning) {
             yaw = playerYaw;
@@ -32,11 +39,17 @@ public final class FreeLookState {
         returning = false;
     }
 
-    /** Key released (or focus lost): ease back, or stop at once. */
+    /**
+     * Key released (or focus lost). With {@code smoothReturn} the camera eases
+     * back over {@link #RETURN_DURATION}; otherwise it is back at once.
+     */
     public void release(boolean smoothReturn) {
         if (!held) return;
         held = false;
         returning = smoothReturn;
+        fromYaw = yaw;
+        fromPitch = pitch;
+        progress = 0f;
     }
 
     /** Mouse movement while held; same scale as {@code Entity.setAngles}. */
@@ -45,19 +58,26 @@ public final class FreeLookState {
         pitch = clampPitch((float) (pitch - dy * 0.15));
     }
 
-    /** Advance the return animation towards the player's current rotation. */
-    public void update(float dt, float playerYaw, float playerPitch, float speed) {
+    /**
+     * Advance the return towards the player's current rotation (which may
+     * itself move: mouse look goes to the player again as soon as the key is
+     * released).
+     */
+    public void update(float dt, float playerYaw, float playerPitch, float duration) {
         if (!returning) return;
-        float dYaw = wrapDegrees(playerYaw - yaw);
-        float dPitch = clampPitch(playerPitch) - pitch;
-        if (Math.abs(dYaw) < DONE && Math.abs(dPitch) < DONE) {
+        if (dt > 0f) {
+            float d = duration > 0f ? duration : RETURN_DURATION;
+            progress = Math.min(1f, progress + Math.min(dt, MAX_DT) / d);
+        }
+        if (progress >= 1f) {
+            yaw = playerYaw;
+            pitch = clampPitch(playerPitch);
             returning = false;
             return;
         }
-        if (!(dt > 0f)) return;
-        float k = (float) (1.0 - Math.exp(-speed * Math.min(dt, MAX_DT)));
-        yaw += dYaw * k;
-        pitch += dPitch * k;
+        double e = easeOutCubic(progress);
+        yaw = (float) (fromYaw + wrapDegrees(playerYaw - fromYaw) * e);
+        pitch = (float) (fromPitch + (clampPitch(playerPitch) - fromPitch) * e);
     }
 
     /** True while the camera must use these angles instead of the player's. */
@@ -85,6 +105,11 @@ public final class FreeLookState {
     public void reset() {
         held = false;
         returning = false;
+    }
+
+    static double easeOutCubic(float t) {
+        double x = 1.0 - (t <= 0f ? 0.0 : (t >= 1f ? 1.0 : t));
+        return 1.0 - x * x * x;
     }
 
     static float clampPitch(float p) {

@@ -36,16 +36,16 @@ public class FreeLookStateTest {
         assertTrue(f.isReturning());
         float player = -170f; // shortest way from 170 to -170 is +20 degrees
         float prev = f.yaw();
-        f.update(FRAME, player, 20f, FreeLookState.RETURN_SPEED);
+        f.update(FRAME, player, 20f, FreeLookState.RETURN_DURATION);
         assertTrue("moves forward across 180, not back through 0", f.yaw() > prev);
         int frames = 0;
         while (f.overrides() && frames++ < 600) {
-            f.update(FRAME, player, 20f, FreeLookState.RETURN_SPEED);
+            f.update(FRAME, player, 20f, FreeLookState.RETURN_DURATION);
         }
         assertFalse(f.overrides());
-        assertEquals(0f, FreeLookState.wrapDegrees(player - f.yaw()), FreeLookState.DONE);
-        assertEquals(20f, f.pitch(), FreeLookState.DONE);
-        assertTrue("return finishes in well under a second", frames < 60);
+        assertEquals(0f, FreeLookState.wrapDegrees(player - f.yaw()), 0f);
+        assertEquals(20f, f.pitch(), 0f);
+        assertTrue("return finishes within its fixed duration", frames <= Math.ceil(FreeLookState.RETURN_DURATION / FRAME));
     }
 
     @Test
@@ -67,7 +67,7 @@ public class FreeLookStateTest {
         f.press(0f, 0f);
         f.turn(600f, 0f); // 90 degrees
         f.release(true);
-        f.update(FRAME, 0f, 0f, FreeLookState.RETURN_SPEED);
+        f.update(FRAME, 0f, 0f, FreeLookState.RETURN_DURATION);
         float mid = f.yaw();
         f.press(0f, 0f);
         assertEquals("no jump when pressed again mid-return", mid, f.yaw(), 0f);
@@ -80,5 +80,50 @@ public class FreeLookStateTest {
         assertEquals(-180f, FreeLookState.wrapDegrees(180f), 0f);
         assertEquals(170f, FreeLookState.wrapDegrees(-190f), 0f);
         assertEquals(-10f, FreeLookState.wrapDegrees(710f), 1e-4f);
+    }
+
+    @Test
+    public void returnStartsOnTheReleaseFrameAndIsBoundedForAnyAngle() {
+        for (float turned : new float[] {5f, 90f, 179f, 720f}) {
+            FreeLookState f = new FreeLookState();
+            f.press(0f, 0f);
+            f.turn(turned / 0.15f, 300f);
+            float startYaw = f.yaw();
+            float startPitch = f.pitch();
+            f.release(true);
+            f.update(FRAME, 0f, 0f, FreeLookState.RETURN_DURATION);
+            assertTrue("moves on the first frame", f.yaw() != startYaw && f.pitch() != startPitch
+                    || FreeLookState.wrapDegrees(startYaw) == 0f && f.pitch() != startPitch);
+            int frames = 1;
+            while (f.overrides()) {
+                f.update(FRAME, 0f, 0f, FreeLookState.RETURN_DURATION);
+                frames++;
+                assertTrue("bounded return", frames <= 10);
+            }
+            assertEquals(0f, FreeLookState.wrapDegrees(f.yaw()), 0f);
+            assertEquals(0f, f.pitch(), 0f);
+        }
+    }
+
+    @Test
+    public void returnFollowsThePlayerIfTheyTurnMeanwhile() {
+        FreeLookState f = new FreeLookState();
+        f.press(0f, 0f);
+        f.turn(600f, 0f);
+        f.release(true);
+        float player = 0f;
+        while (f.overrides()) {
+            player += 1f; // mouse now turns the player
+            f.update(FRAME, player, 5f, FreeLookState.RETURN_DURATION);
+        }
+        assertEquals(player, f.yaw(), 0f);
+        assertEquals(5f, f.pitch(), 0f);
+    }
+
+    @Test
+    public void easeOutStartsFast() {
+        assertTrue(FreeLookState.easeOutCubic(0.1f) > 0.25);
+        assertEquals(1.0, FreeLookState.easeOutCubic(1f), 0.0);
+        assertEquals(0.0, FreeLookState.easeOutCubic(0f), 0.0);
     }
 }

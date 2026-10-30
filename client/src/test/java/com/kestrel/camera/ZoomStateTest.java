@@ -62,4 +62,46 @@ public class ZoomStateTest {
         z.reset();
         assertEquals(1f, z.fovMultiplier(), 0f);
     }
+
+    @Test
+    public void easesInAndOutWithinTheConfiguredTime() {
+        ZoomState z = new ZoomState();
+        float speed = 14f; // ~0.214 s
+        float d = ZoomState.duration(speed);
+        int frames = (int) Math.ceil(d / FRAME);
+        float[] m = new float[frames + 1];
+        m[0] = 1f;
+        for (int i = 1; i <= frames; i++) {
+            z.update(true, 4f, speed, true, FRAME);
+            m[i] = z.fovMultiplier();
+        }
+        assertEquals("finished on time", 0.25f, m[frames], 0f);
+        assertFalse(z.isAnimating());
+        // Starts and ends gently (smaller steps than in the middle), never jumps.
+        double first = Math.log(m[0]) - Math.log(m[1]);
+        double last = Math.log(m[frames - 1]) - Math.log(m[frames]);
+        double mid = Math.log(m[frames / 2 - 1]) - Math.log(m[frames / 2]);
+        assertTrue(first < mid && last < mid);
+        assertTrue("first frame already moves", first > 0);
+        assertTrue("no step bigger than 15% of the zoom range", mid < Math.log(4) * 0.15);
+    }
+
+    @Test
+    public void releasingMidZoomReversesFromTheCurrentValue() {
+        ZoomState z = new ZoomState();
+        for (int i = 0; i < 5; i++) z.update(true, 4f, 14f, true, FRAME);
+        float mid = z.fovMultiplier();
+        assertTrue(mid < 1f && mid > 0.25f);
+        z.update(false, 4f, 14f, true, FRAME);
+        assertTrue("no jump on reversal", Math.abs(z.fovMultiplier() - mid) < 0.02f);
+        assertTrue(z.fovMultiplier() >= mid);
+    }
+
+    @Test
+    public void durationFollowsSpeedSetting() {
+        assertTrue(ZoomState.duration(2f) > ZoomState.duration(14f));
+        assertTrue(ZoomState.duration(14f) > ZoomState.duration(40f));
+        assertEquals(ZoomState.MAX_DURATION, ZoomState.duration(0.1f), 0f);
+        assertEquals(ZoomState.MIN_DURATION, ZoomState.duration(1000f), 0f);
+    }
 }
