@@ -295,91 +295,135 @@ pub const VIEW_H: u32 = 32;
 /// Gap between the front and back view.
 pub const VIEW_GAP: u32 = 4;
 
-/// Flat front and back views of a skin, side by side (36x32 RGBA), with the
-/// second (hat/jacket/sleeve/pants) layer drawn over the base layer. Like the
-/// game, the base layer is drawn opaque; legacy 64x32 skins get mirrored left
-/// limbs, exactly as Minecraft 1.8 converts them.
+/// The texture exactly as Minecraft 1.8.9 prepares a skin
+/// (`ImageBufferDownload.parseUserSkin`, checked against the bytecode): always
+/// 64x64; legacy 64x32 skins get mirrored copies of the right arm/leg as the
+/// left ones; base-layer areas are made opaque; and each second-layer area
+/// that has no transparent pixel at all is cleared (old skins often fill the
+/// unused hat area with a solid colour).
+pub fn game_texture(img: &crate::cosmetics::Rgba) -> crate::cosmetics::Rgba {
+    let mut out = crate::cosmetics::Rgba {
+        width: 64,
+        height: 64,
+        pixels: vec![0; 64 * 64 * 4],
+    };
+    let h = img.height.min(64);
+    for y in 0..h {
+        let src = (y * img.width * 4) as usize;
+        let dst = (y * 64 * 4) as usize;
+        let n = (img.width.min(64) * 4) as usize;
+        out.pixels[dst..dst + n].copy_from_slice(&img.pixels[src..src + n]);
+    }
+    if img.height == 32 {
+        // (dst x1, dst y1, dst x2, dst y2, src x1, src y1): dst x runs
+        // backwards, i.e. a horizontally mirrored copy (vanilla drawImage calls).
+        const LEGACY: [(u32, u32, u32, u32, u32, u32); 12] = [
+            (24, 48, 20, 52, 4, 16),
+            (28, 48, 24, 52, 8, 16),
+            (20, 52, 16, 64, 8, 20),
+            (24, 52, 20, 64, 4, 20),
+            (28, 52, 24, 64, 0, 20),
+            (32, 52, 28, 64, 12, 20),
+            (40, 48, 36, 52, 44, 16),
+            (44, 48, 40, 52, 48, 16),
+            (36, 52, 32, 64, 48, 20),
+            (40, 52, 36, 64, 44, 20),
+            (44, 52, 40, 64, 40, 20),
+            (48, 52, 44, 64, 52, 20),
+        ];
+        for (dx1, dy1, dx2, dy2, sx, sy) in LEGACY {
+            for y in 0..dy2 - dy1 {
+                for x in 0..dx1 - dx2 {
+                    let si = (((sy + y) * 64 + sx + x) * 4) as usize;
+                    let di = (((dy1 + y) * 64 + dx1 - 1 - x) * 4) as usize;
+                    let px: [u8; 4] = out.pixels[si..si + 4].try_into().unwrap_or([0; 4]);
+                    out.pixels[di..di + 4].copy_from_slice(&px);
+                }
+            }
+        }
+    }
+    let opaque = |o: &mut crate::cosmetics::Rgba, (x1, y1, x2, y2): (u32, u32, u32, u32)| {
+        for y in y1..y2 {
+            for x in x1..x2 {
+                o.pixels[((y * 64 + x) * 4 + 3) as usize] = 255;
+            }
+        }
+    };
+    let clear_if_solid = |o: &mut crate::cosmetics::Rgba,
+                          (x1, y1, x2, y2): (u32, u32, u32, u32)| {
+        let has_transparency =
+            (y1..y2).any(|y| (x1..x2).any(|x| o.pixels[((y * 64 + x) * 4 + 3) as usize] < 128));
+        if !has_transparency {
+            for y in y1..y2 {
+                for x in x1..x2 {
+                    o.pixels[((y * 64 + x) * 4 + 3) as usize] = 0;
+                }
+            }
+        }
+    };
+    opaque(&mut out, (0, 0, 32, 16));
+    clear_if_solid(&mut out, (32, 0, 64, 32));
+    opaque(&mut out, (0, 16, 64, 32));
+    clear_if_solid(&mut out, (0, 32, 16, 48));
+    clear_if_solid(&mut out, (16, 32, 40, 48));
+    clear_if_solid(&mut out, (40, 32, 56, 48));
+    clear_if_solid(&mut out, (0, 48, 16, 64));
+    opaque(&mut out, (16, 48, 48, 64));
+    clear_if_solid(&mut out, (48, 48, 64, 64));
+    out
+}
+
+/// Flat front and back views of a skin, side by side (36x32 RGBA), drawn
+/// from [`game_texture`] so they match what the game shows: second layer
+/// (hat/jacket/sleeves/pants) blended over the base layer.
 pub fn preview(img: &crate::cosmetics::Rgba, slim: bool) -> crate::cosmetics::Rgba {
+    let tex = game_texture(img);
     let w = VIEW_W * 2 + VIEW_GAP;
     let mut out = crate::cosmetics::Rgba {
         width: w,
         height: VIEW_H,
         pixels: vec![0; (w * VIEW_H * 4) as usize],
     };
-    let legacy = img.height == 32;
-    let aw = if slim && !legacy { 3 } else { 4 };
-    // (src x, src y, width, height, dst x, dst y, mirror, overlay)
-    type Part = (u32, u32, u32, u32, u32, u32, bool, bool);
-    let mut parts: Vec<Part> = Vec::with_capacity(24);
-    // Front view: the player's right side is on the viewer's left.
-    parts.extend([
-        (8, 8, 8, 8, 4, 0, false, false),
-        (20, 20, 8, 12, 4, 8, false, false),
-        (44, 20, aw, 12, 4 - aw, 8, false, false),
-        (4, 20, 4, 12, 4, 20, false, false),
-    ]);
-    if legacy {
-        parts.extend([
-            (44, 20, 4, 12, 12, 8, true, false),
-            (4, 20, 4, 12, 8, 20, true, false),
-        ]);
-    } else {
-        parts.extend([
-            (36, 52, aw, 12, 12, 8, false, false),
-            (20, 52, 4, 12, 8, 20, false, false),
-        ]);
-    }
-    parts.push((40, 8, 8, 8, 4, 0, false, true));
-    if !legacy {
-        parts.extend([
-            (20, 36, 8, 12, 4, 8, false, true),
-            (44, 36, aw, 12, 4 - aw, 8, false, true),
-            (52, 52, aw, 12, 12, 8, false, true),
-            (4, 36, 4, 12, 4, 20, false, true),
-            (4, 52, 4, 12, 8, 20, false, true),
-        ]);
-    }
-    // Back view: the player's left side is on the viewer's left.
+    let aw = if slim && img.height == 64 { 3 } else { 4 };
     let bx = VIEW_W + VIEW_GAP;
     let r_back = 40 + 4 + aw + 4; // right arm back face
     let l_back = 32 + 4 + aw + 4; // left arm back face
-    parts.extend([
-        (24, 8, 8, 8, bx + 4, 0, false, false),
-        (32, 20, 8, 12, bx + 4, 8, false, false),
-        (r_back, 20, aw, 12, bx + 12, 8, false, false),
-        (12, 20, 4, 12, bx + 8, 20, false, false),
-    ]);
-    if legacy {
-        parts.extend([
-            (r_back, 20, 4, 12, bx, 8, true, false),
-            (12, 20, 4, 12, bx + 4, 20, true, false),
-        ]);
-    } else {
-        parts.extend([
-            (l_back, 52, aw, 12, bx + 4 - aw, 8, false, false),
-            (28, 52, 4, 12, bx + 4, 20, false, false),
-        ]);
-    }
-    parts.push((56, 8, 8, 8, bx + 4, 0, false, true));
-    if !legacy {
-        parts.extend([
-            (32, 36, 8, 12, bx + 4, 8, false, true),
-            (r_back, 36, aw, 12, bx + 12, 8, false, true),
-            (l_back + 16, 52, aw, 12, bx + 4 - aw, 8, false, true),
-            (12, 36, 4, 12, bx + 8, 20, false, true),
-            (12, 52, 4, 12, bx + 4, 20, false, true),
-        ]);
-    }
-    for (sx, sy, pw, ph, dx, dy, mirror, overlay) in parts {
+    // (src x, src y, width, height, dst x, dst y, overlay). Front view: the
+    // player's right side is on the viewer's left; back view the opposite.
+    let parts: [(u32, u32, u32, u32, u32, u32, bool); 24] = [
+        (8, 8, 8, 8, 4, 0, false),
+        (20, 20, 8, 12, 4, 8, false),
+        (44, 20, aw, 12, 4 - aw, 8, false),
+        (36, 52, aw, 12, 12, 8, false),
+        (4, 20, 4, 12, 4, 20, false),
+        (20, 52, 4, 12, 8, 20, false),
+        (40, 8, 8, 8, 4, 0, true),
+        (20, 36, 8, 12, 4, 8, true),
+        (44, 36, aw, 12, 4 - aw, 8, true),
+        (52, 52, aw, 12, 12, 8, true),
+        (4, 36, 4, 12, 4, 20, true),
+        (4, 52, 4, 12, 8, 20, true),
+        (24, 8, 8, 8, bx + 4, 0, false),
+        (32, 20, 8, 12, bx + 4, 8, false),
+        (r_back, 20, aw, 12, bx + 12, 8, false),
+        (l_back, 52, aw, 12, bx + 4 - aw, 8, false),
+        (12, 20, 4, 12, bx + 8, 20, false),
+        (28, 52, 4, 12, bx + 4, 20, false),
+        (56, 8, 8, 8, bx + 4, 0, true),
+        (32, 36, 8, 12, bx + 4, 8, true),
+        (r_back, 36, aw, 12, bx + 12, 8, true),
+        (l_back + 16, 52, aw, 12, bx + 4 - aw, 8, true),
+        (12, 36, 4, 12, bx + 8, 20, true),
+        (12, 52, 4, 12, bx + 4, 20, true),
+    ];
+    for (sx, sy, pw, ph, dx, dy, overlay) in parts {
         for y in 0..ph {
             for x in 0..pw {
-                let srcx = if mirror { sx + pw - 1 - x } else { sx + x };
-                let si = (((sy + y) * img.width + srcx) * 4) as usize;
+                let si = (((sy + y) * 64 + sx + x) * 4) as usize;
                 let di = (((dy + y) * w + dx + x) * 4) as usize;
-                let src = &img.pixels[si..si + 4];
+                let src = &tex.pixels[si..si + 4];
                 if !overlay {
-                    out.pixels[di..di + 3].copy_from_slice(&src[..3]);
-                    out.pixels[di + 3] = 255;
+                    out.pixels[di..di + 4].copy_from_slice(src);
                 } else if src[3] > 0 {
                     let a = src[3] as u32;
                     for (d, &sc) in out.pixels[di..di + 3].iter_mut().zip(&src[..3]) {
@@ -1136,7 +1180,41 @@ mod tests {
         let l = preview(&legacy, true);
         let lat = |x: u32, y: u32| l.pixels[((y * l.width + x) * 4) as usize];
         assert_eq!(lat(12, 8), 47); // mirrored right arm front (44..48 reversed)
+        assert_eq!(lat(15, 8), 44);
         assert_eq!(lat(0, 8), 44); // slim ignored for legacy
+        assert_eq!(lat(8, 20), 7); // left leg = mirrored right leg front (4..8 reversed)
+    }
+
+    #[test]
+    fn solid_hat_area_is_cleared_like_vanilla() {
+        // Old skins often paint the whole hat area black; Minecraft hides it.
+        let img = crate::cosmetics::decode_png(&png(64, 32, |x, y| {
+            if x >= 32 && y < 16 {
+                [0, 0, 0, 255]
+            } else {
+                [200, 150, 100, 255]
+            }
+        }))
+        .unwrap();
+        let p = preview(&img, false);
+        assert_eq!(&p.pixels[(4 * 4)..(4 * 4 + 4)], &[200, 150, 100, 255]);
+        // A hat area with any transparency is kept.
+        let img = crate::cosmetics::decode_png(&png(64, 64, |x, y| {
+            if x == 63 && y == 0 {
+                [0, 0, 0, 0]
+            } else if x >= 32 && y < 16 {
+                [0, 0, 0, 255]
+            } else {
+                [200, 150, 100, 255]
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            &preview(&img, false).pixels[(4 * 4)..(4 * 4 + 4)],
+            &[0, 0, 0, 255]
+        );
+        let t = game_texture(&img);
+        assert_eq!((t.width, t.height), (64, 64));
     }
 
     #[test]

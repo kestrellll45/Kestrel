@@ -312,134 +312,21 @@ impl SkinPage {
         }
         ui.add_space(8.0);
 
-        ui.horizontal_top(|ui| {
-            // Big preview.
-            card(ui, |ui| {
-                ui.set_width(250.0);
-                let (key, slim, title) = match self.selected_entry() {
-                    Some(e) => (e.file.clone(), e.model == MODEL_SLIM, e.name.clone()),
-                    None => (
-                        ACCOUNT.to_string(),
-                        self.account_model == Some(MODEL_SLIM),
-                        "Account skin".to_string(),
-                    ),
-                };
-                ui.label(RichText::new(&title).strong());
-                ui.label(RichText::new("Front                Back").small().color(MUTED));
-                let size = Vec2::new(36.0 * 6.0, 32.0 * 6.0);
-                if let Some(t) = self.texture(&ctx, &key, slim) {
-                    ui.add(egui::Image::new(&t).fit_to_exact_size(size));
-                } else {
-                    let (r, _) = ui.allocate_exact_size(size, Sense::hover());
-                    let msg = match self.errors.get(&key) {
-                        Some(e) => e.clone(),
-                        None if key == ACCOUNT && self.account_uuid.is_none() => {
-                            "Sign in with Microsoft to preview your account skin.".into()
-                        }
-                        None => "Loading…".into(),
-                    };
-                    ui.painter().text(
-                        r.center(),
-                        egui::Align2::CENTER_CENTER,
-                        msg,
-                        egui::FontId::proportional(13.0),
-                        MUTED,
-                    );
-                }
-                // Arm model of the selected imported skin.
-                let legacy = self.images.get(&key).is_some_and(|i| i.height == 32);
-                if let Some(file) = self.selected.clone() {
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.label("Arms:");
-                        let current = self.selected_entry().map(|e| e.model.clone()).unwrap_or_default();
-                        let mut model = current.clone();
-                        ui.selectable_value(&mut model, MODEL_CLASSIC.to_string(), "Classic (4 px)");
-                        ui.add_enabled_ui(!legacy, |ui| {
-                            ui.selectable_value(&mut model, MODEL_SLIM.to_string(), "Slim (3 px)")
-                                .on_disabled_hover_text("Old 64x32 skins only support classic arms");
-                        });
-                        if model != current
-                            && let Some(e) = self.state.skins.iter_mut().find(|s| s.file == file)
-                        {
-                            e.model = model;
-                            let what = if self.state.active.as_deref() == Some(file.as_str()) {
-                                "Arm model updated."
-                            } else {
-                                "Arm model saved."
-                            };
-                            self.save(game_running, what);
-                        }
-                    });
-                }
-            });
-            ui.add_space(12.0);
-
-            // Actions.
-            ui.vertical(|ui| {
-                ui.set_width(420.0);
-                card(ui, |ui| {
-                    ui.add_enabled_ui(!self.busy, |ui| {
-                        if ui.add(big_button("Import Skin…", false)).clicked() {
-                            self.import_file();
-                        }
-                        ui.label(RichText::new("PNG, 64x64 or the old 64x32 format, up to 512 KB.").small().color(MUTED));
-                        ui.add_space(10.0);
-                        ui.label(RichText::new("Load from NameMC").strong());
-                        let edit = ui.add(
-                            egui::TextEdit::singleline(&mut self.url)
-                                .hint_text("https://namemc.com/profile/<name>")
-                                .desired_width(400.0)
-                                .char_limit(300),
-                        );
-                        let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        if ui.add(big_button("Load from URL", false)).clicked() || (enter && !self.url.trim().is_empty()) {
-                            self.import_url();
-                        }
-                        ui.label(
-                            RichText::new(
-                                "Profile links load that player's current skin through Mojang's public profile API. \
-                                 NameMC skin pages (namemc.com/skin/…) can't be fetched automatically: download the \
-                                 PNG from the page and use Import Skin.",
-                            )
-                            .small()
-                            .color(MUTED),
-                        );
-                    });
-                    if self.busy {
-                        ui.add(egui::Spinner::new());
-                    }
-                });
-                ui.add_space(10.0);
-                card(ui, |ui| {
-                    let selected_is_active = self.selected == self.state.active;
-                    ui.horizontal(|ui| {
-                        let apply = ui.add_enabled(
-                            !self.busy && self.selected.is_some() && !selected_is_active,
-                            big_button("Apply Skin", true),
-                        );
-                        if apply.clicked() {
-                            self.state.active = self.selected.clone();
-                            self.save(game_running, "Skin applied.");
-                        }
-                        let restore = ui.add_enabled(
-                            !self.busy && self.state.active.is_some(),
-                            big_button("Restore Account Skin", false),
-                        );
-                        if restore.clicked() {
-                            self.state.active = None;
-                            self.selected = None;
-                            self.save(game_running, "Account skin restored.");
-                        }
-                    });
-                    if self.selected.is_some() && selected_is_active {
-                        ui.label(RichText::new("This skin is active.").small().color(OK));
-                    } else if self.selected.is_some() {
-                        ui.label(RichText::new("Previewing; press Apply Skin to use it.").small().color(WARN));
-                    }
+        // Preview beside the actions on wide windows, above them on narrow ones.
+        if ui.available_width() >= 720.0 {
+            ui.horizontal_top(|ui| {
+                self.preview_ui(ui, &ctx, game_running);
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width().min(460.0));
+                    self.actions_ui(ui, game_running);
                 });
             });
-        });
+        } else {
+            self.preview_ui(ui, &ctx, game_running);
+            ui.add_space(10.0);
+            self.actions_ui(ui, game_running);
+        }
 
         // Library of imported skins.
         ui.add_space(12.0);
@@ -501,6 +388,154 @@ impl SkinPage {
             .small()
             .color(MUTED),
         );
+    }
+
+    /// Big front/back preview of the selected skin and its arm model.
+    fn preview_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, game_running: bool) {
+        egui::Frame::NONE
+            .fill(CARD)
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(14.0)
+            .show(ui, |ui| {
+                ui.set_width(250.0);
+                let (key, slim, title) = match self.selected_entry() {
+                    Some(e) => (e.file.clone(), e.model == MODEL_SLIM, e.name.clone()),
+                    None => (
+                        ACCOUNT.to_string(),
+                        self.account_model == Some(MODEL_SLIM),
+                        "Account skin".to_string(),
+                    ),
+                };
+                ui.label(RichText::new(&title).strong());
+                ui.label(
+                    RichText::new("Front                Back")
+                        .small()
+                        .color(MUTED),
+                );
+                let size = Vec2::new(36.0 * 6.0, 32.0 * 6.0);
+                if let Some(t) = self.texture(ctx, &key, slim) {
+                    ui.add(egui::Image::new(&t).fit_to_exact_size(size));
+                } else {
+                    let (r, _) = ui.allocate_exact_size(size, Sense::hover());
+                    let msg = match self.errors.get(&key) {
+                        Some(e) => e.clone(),
+                        None if key == ACCOUNT && self.account_uuid.is_none() => {
+                            "Sign in with Microsoft to preview your account skin.".into()
+                        }
+                        None => "Loading…".into(),
+                    };
+                    ui.painter().text(
+                        r.center(),
+                        egui::Align2::CENTER_CENTER,
+                        msg,
+                        egui::FontId::proportional(13.0),
+                        MUTED,
+                    );
+                }
+                // Arm model of the selected imported skin.
+                let legacy = self.images.get(&key).is_some_and(|i| i.height == 32);
+                if let Some(file) = self.selected.clone() {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Arms:");
+                        let current = self
+                            .selected_entry()
+                            .map(|e| e.model.clone())
+                            .unwrap_or_default();
+                        let mut model = current.clone();
+                        ui.selectable_value(
+                            &mut model,
+                            MODEL_CLASSIC.to_string(),
+                            "Classic (4 px)",
+                        );
+                        ui.add_enabled_ui(!legacy, |ui| {
+                            ui.selectable_value(&mut model, MODEL_SLIM.to_string(), "Slim (3 px)")
+                                .on_disabled_hover_text(
+                                    "Old 64x32 skins only support classic arms",
+                                );
+                        });
+                        if model != current
+                            && let Some(e) = self.state.skins.iter_mut().find(|s| s.file == file)
+                        {
+                            e.model = model;
+                            let what = if self.state.active.as_deref() == Some(file.as_str()) {
+                                "Arm model updated."
+                            } else {
+                                "Arm model saved."
+                            };
+                            self.save(game_running, what);
+                        }
+                    });
+                }
+            });
+    }
+
+    /// Import, URL and apply/restore controls.
+    fn actions_ui(&mut self, ui: &mut egui::Ui, game_running: bool) {
+        card(ui, |ui| {
+            ui.add_enabled_ui(!self.busy, |ui| {
+                if ui.add(big_button("Import Skin…", false)).clicked() {
+                    self.import_file();
+                }
+                ui.label(RichText::new("PNG, 64x64 or the old 64x32 format, up to 512 KB.").small().color(MUTED));
+                ui.add_space(10.0);
+                ui.label(RichText::new("Load from NameMC").strong());
+                let edit = ui.add(
+                    egui::TextEdit::singleline(&mut self.url)
+                        .hint_text("https://namemc.com/profile/<name>")
+                        .desired_width(400.0)
+                        .char_limit(300),
+                );
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.add(big_button("Load from URL", false)).clicked() || (enter && !self.url.trim().is_empty()) {
+                    self.import_url();
+                }
+                ui.label(
+                    RichText::new(
+                        "Profile links load that player's current skin through Mojang's public profile API. \
+                         NameMC skin pages (namemc.com/skin/…) can't be fetched automatically: download the \
+                         PNG from the page and use Import Skin.",
+                    )
+                    .small()
+                    .color(MUTED),
+                );
+            });
+            if self.busy {
+                ui.add(egui::Spinner::new());
+            }
+        });
+        ui.add_space(10.0);
+        card(ui, |ui| {
+            let selected_is_active = self.selected == self.state.active;
+            ui.horizontal(|ui| {
+                let apply = ui.add_enabled(
+                    !self.busy && self.selected.is_some() && !selected_is_active,
+                    big_button("Apply Skin", true),
+                );
+                if apply.clicked() {
+                    self.state.active = self.selected.clone();
+                    self.save(game_running, "Skin applied.");
+                }
+                let restore = ui.add_enabled(
+                    !self.busy && self.state.active.is_some(),
+                    big_button("Restore Account Skin", false),
+                );
+                if restore.clicked() {
+                    self.state.active = None;
+                    self.selected = None;
+                    self.save(game_running, "Account skin restored.");
+                }
+            });
+            if self.selected.is_some() && selected_is_active {
+                ui.label(RichText::new("This skin is active.").small().color(OK));
+            } else if self.selected.is_some() {
+                ui.label(
+                    RichText::new("Previewing; press Apply Skin to use it.")
+                        .small()
+                        .color(WARN),
+                );
+            }
+        });
     }
 }
 
